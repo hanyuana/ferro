@@ -128,11 +128,11 @@ impl AppState {
                     self.entries.push(ChatEntry::Reasoning(t));
                 }
             }
-            AgentEvent::ToolCall { name, title } => {
+            AgentEvent::ToolCall { name, title, .. } => {
                 self.status_text = format!("正在执行 {}({})…", name, title);
                 self.entries.push(ChatEntry::ToolCall { name, title });
             }
-            AgentEvent::ToolResult { name, ok, summary, display } => {
+            AgentEvent::ToolResult { name, ok, summary, display, .. } => {
                 if matches!(name.as_str(), "write" | "edit" | "multi_edit") && ok {
                     self.refresh_files();
                 }

@@ -8,6 +8,8 @@ use std::time::SystemTime;
 #[derive(Default)]
 pub struct FileTracker {
     read: HashMap<PathBuf, Option<SystemTime>>,
+    /// 记录本轮被修改前的文件原内容（None 表示文件原本不存在，撤销时应删除）
+    backups: HashMap<PathBuf, Option<String>>,
 }
 
 fn mtime(p: &Path) -> Option<SystemTime> {
@@ -17,6 +19,31 @@ fn mtime(p: &Path) -> Option<SystemTime> {
 impl FileTracker {
     pub fn record(&mut self, p: &Path) {
         self.read.insert(p.to_path_buf(), mtime(p));
+    }
+
+    /// 在修改文件前记录原始快照（同一轮多次修改同一文件仅保留最初状态）
+    pub fn save_backup(&mut self, p: &Path, original: Option<String>) {
+        self.backups.entry(p.to_path_buf()).or_insert(original);
+    }
+
+    pub fn clear_backups(&mut self) {
+        self.backups.clear();
+    }
+
+    /// 撤销本轮所有文件修改，返回已恢复的文件列表
+    pub fn undo_all(&mut self) -> Vec<PathBuf> {
+        let mut restored = Vec::new();
+        for (path, orig) in self.backups.drain() {
+            let ok = match orig {
+                Some(content) => std::fs::write(&path, content).is_ok(),
+                None => std::fs::remove_file(&path).is_ok(),
+            };
+            if ok {
+                self.read.insert(path.clone(), mtime(&path));
+                restored.push(path);
+            }
+        }
+        restored
     }
 
     /// 修改已存在文件之前调用：必须先读过，且读后未被外部修改

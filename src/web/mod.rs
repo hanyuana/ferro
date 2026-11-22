@@ -9,7 +9,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -22,6 +22,8 @@ struct WebState {
     config: Mutex<Config>,
     sse_tx: broadcast::Sender<String>,
     active_cancel: Mutex<Option<Arc<Notify>>>,
+    busy: AtomicBool,
+    cached_files: Mutex<Option<(PathBuf, Vec<String>)>>,
     pending_perms: Mutex<HashMap<u64, oneshot::Sender<Decision>>>,
     next_perm_id: AtomicU64,
     shutdown: Arc<Notify>,
@@ -45,6 +47,8 @@ pub async fn run_gui(agent: Agent, config: Config, port: Option<u16>) -> Result<
         config: Mutex::new(config),
         sse_tx,
         active_cancel: Mutex::new(None),
+        busy: AtomicBool::new(false),
+        cached_files: Mutex::new(None),
         pending_perms: Mutex::new(HashMap::new()),
         next_perm_id: AtomicU64::new(1),
         shutdown: shutdown.clone(),
@@ -53,13 +57,13 @@ pub async fn run_gui(agent: Agent, config: Config, port: Option<u16>) -> Result<
 
     let url_for_win = url.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let _ = open_app_window(&url_for_win);
     });
 
     loop {
         tokio::select! {
             Ok((stream, _)) = listener.accept() => {
+                let _ = stream.set_nodelay(true);
                 let st = shared.clone();
                 tokio::spawn(async move {
                     let _ = handle_conn(stream, st).await;
@@ -145,7 +149,7 @@ async fn pick_folder_dialog(initial: &Path) -> Option<PathBuf> {
 }
 
 async fn handle_conn(mut stream: TcpStream, state: Arc<WebState>) -> Result<()> {
-    let mut buf = vec![0u8; 65536];
+    let mut buf = vec![0u8; 8192];
     let mut len = 0usize;
     let header_end = loop {
         let n = stream.read(&mut buf[len..]).await?;
@@ -287,6 +291,15 @@ async fn handle_conn(mut stream: TcpStream, state: Arc<WebState>) -> Result<()> 
             let id = body_json["id"].as_str().unwrap_or("").trim();
             let mut ui_msgs = Vec::new();
             if let Some(msgs) = crate::growth::history::load_session(id) {
+                let mut tool_results: HashMap<String, (bool, String)> = HashMap::new();
+                for m in &msgs {
+                    for b in &m.content {
+                        if let Block::ToolResult { tool_use_id, content, is_error } = b {
+                            let first = content.lines().next().unwrap_or("").trim().chars().take(100).collect::<String>();
+                            tool_results.insert(tool_use_id.clone(), (!*is_error, first));
+                        }
+                    }
+                }
                 let mut a = state.agent.lock().await;
                 a.session_id = id.to_string();
                 for m in &msgs {
@@ -310,7 +323,7 @@ async fn handle_conn(mut stream: TcpStream, state: Arc<WebState>) -> Result<()> 
                                     Block::Text { text } => {
                                         ui_msgs.push(json!({ "type": "text", "text": text }));
                                     }
-                                    Block::ToolUse { name, input, .. } => {
+                                    Block::ToolUse { id: call_id, name, input } => {
                                         let title = input
                                             .get("file_path")
                                             .or_else(|| input.get("command"))
@@ -318,7 +331,16 @@ async fn handle_conn(mut stream: TcpStream, state: Arc<WebState>) -> Result<()> 
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
                                             .to_string();
-                                        ui_msgs.push(json!({ "type": "tool_call", "name": name, "title": title }));
+                                        ui_msgs.push(json!({ "type": "tool_call", "id": call_id, "name": name, "title": title }));
+                                        if let Some((ok, summary)) = tool_results.get(call_id) {
+                                            ui_msgs.push(json!({
+                                                "type": "tool_result",
+                                                "id": call_id,
+                                                "name": name,
+                                                "ok": ok,
+                                                "summary": summary
+                                            }));
+                                        }
                                     }
                                     _ => {}
                                 }
@@ -326,9 +348,25 @@ async fn handle_conn(mut stream: TcpStream, state: Arc<WebState>) -> Result<()> 
                         }
                     }
                 }
+                if !ui_msgs.is_empty() {
+                    ui_msgs.push(json!({ "type": "done" }));
+                }
                 a.messages = msgs;
             }
             json!({ "ok": true, "messages": ui_msgs })
+        }
+        ("POST", "/api/undo") => {
+            let restored: Vec<String> = {
+                let a = state.agent.lock().await;
+                let cwd = a.ctx.cwd.clone();
+                let paths = a.ctx.tracker.lock().unwrap().undo_all();
+                paths
+                    .into_iter()
+                    .map(|p| crate::tools::display_path(&cwd, &p))
+                    .collect()
+            };
+            *state.cached_files.lock().await = None;
+            json!({ "ok": true, "restored": restored })
         }
         ("POST", "/api/session/delete") => {
             let id = body_json["id"].as_str().unwrap_or("").trim();
@@ -391,10 +429,14 @@ async fn handle_conn(mut stream: TcpStream, state: Arc<WebState>) -> Result<()> 
         }
         ("POST", "/api/chat") => {
             let raw = body_json["prompt"].as_str().unwrap_or("").trim().to_string();
-            if !raw.is_empty() {
+            if raw.is_empty() {
+                json!({ "ok": false, "error": "消息内容不能为空" })
+            } else if state.busy.swap(true, Ordering::SeqCst) {
+                json!({ "ok": false, "error": "当前已有任务正在执行，请等待完成或先点击停止" })
+            } else {
                 spawn_chat_turn(state.clone(), raw).await;
+                json!({ "ok": true })
             }
-            json!({ "ok": true })
         }
         _ => json!({ "error": "not found" }),
     };
@@ -406,6 +448,7 @@ async fn handle_conn(mut stream: TcpStream, state: Arc<WebState>) -> Result<()> 
 async fn switch_workspace(state: &WebState, target: PathBuf) {
     if target.is_dir() && !is_system_dir(&target) {
         record_recent_project(&target);
+        *state.cached_files.lock().await = None;
         let mut a = state.agent.lock().await;
         let shell = a.ctx.shell.clone();
         a.system = crate::agent::prompt::build_system_prompt(&target, &shell);
@@ -508,14 +551,22 @@ async fn spawn_chat_turn(state: Arc<WebState>, raw: String) {
             let payload = match ev {
                 AgentEvent::Delta(Delta::Text(t)) => json!({ "type": "text", "text": t }),
                 AgentEvent::Delta(Delta::Reasoning(t)) => json!({ "type": "reasoning", "text": t }),
-                AgentEvent::ToolCall { name, title } => json!({ "type": "tool_call", "name": name, "title": title }),
-                AgentEvent::ToolResult { name, ok, summary, display } => json!({
-                    "type": "tool_result",
-                    "name": name,
-                    "ok": ok,
-                    "summary": summary,
-                    "display": display
-                }),
+                AgentEvent::ToolCall { id, name, title } => {
+                    json!({ "type": "tool_call", "id": id, "name": name, "title": title })
+                }
+                AgentEvent::ToolResult { id, name, ok, summary, display } => {
+                    if ok && matches!(name.as_str(), "write" | "edit" | "multi_edit") {
+                        *state_for_events.cached_files.lock().await = None;
+                    }
+                    json!({
+                        "type": "tool_result",
+                        "id": id,
+                        "name": name,
+                        "ok": ok,
+                        "summary": summary,
+                        "display": display
+                    })
+                }
                 AgentEvent::Permission { name, title, preview, reply } => {
                     let id = state_for_events.next_perm_id.fetch_add(1, Ordering::SeqCst);
                     state_for_events.pending_perms.lock().await.insert(id, reply);
@@ -535,6 +586,8 @@ async fn spawn_chat_turn(state: Arc<WebState>, raw: String) {
         let mut a = state.agent.lock().await;
         let expanded = expand_at_mentions(&a.ctx.cwd, &raw);
         let res = a.run_turn(expanded, ev_tx, cancel).await;
+        *state.active_cancel.lock().await = None;
+        state.busy.store(false, Ordering::SeqCst);
         if let Err(e) = res {
             let _ = state
                 .sse_tx
@@ -551,11 +604,7 @@ async fn spawn_chat_turn(state: Arc<WebState>, raw: String) {
     });
 }
 
-async fn build_state_json(state: &WebState) -> Value {
-    let a = state.agent.lock().await;
-    let cfg = state.config.lock().await;
-    let cwd = &a.ctx.cwd;
-
+fn scan_files_fast(cwd: &Path) -> Vec<String> {
     let mut files = Vec::new();
     for entry in ignore::WalkBuilder::new(cwd).max_depth(Some(5)).build().flatten() {
         if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
@@ -568,6 +617,30 @@ async fn build_state_json(state: &WebState) -> Value {
         }
     }
     files.sort();
+    files
+}
+
+async fn build_state_json(state: &WebState) -> Value {
+    let a = state.agent.lock().await;
+    let cfg = state.config.lock().await;
+    let cwd = &a.ctx.cwd;
+
+    let files = {
+        let mut cache = state.cached_files.lock().await;
+        if let Some((cached_cwd, list)) = cache.as_ref() {
+            if cached_cwd == cwd {
+                list.clone()
+            } else {
+                let scanned = scan_files_fast(cwd);
+                *cache = Some((cwd.clone(), scanned.clone()));
+                scanned
+            }
+        } else {
+            let scanned = scan_files_fast(cwd);
+            *cache = Some((cwd.clone(), scanned.clone()));
+            scanned
+        }
+    };
 
     let mem_path = crate::growth::memory::Scope::Project.path(cwd);
     let memories: Vec<String> = std::fs::read_to_string(&mem_path)

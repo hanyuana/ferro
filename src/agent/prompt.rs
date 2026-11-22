@@ -42,6 +42,7 @@ pub fn build_system_prompt(cwd: &Path, shell: &Shell) -> String {
     s.push_str(&format!("- Shell used by the bash tool: {}\n", shell.describe()));
     s.push_str(&format!("- Git repository: {}\n", if git_root.is_some() { "yes" } else { "no" }));
     s.push_str(&format!("- Today's date: {}\n", today()));
+    s.push_str(&build_workspace_snapshot(cwd));
 
     let instructions = load_instructions(cwd, git_root.as_deref());
     if !instructions.is_empty() {
@@ -65,6 +66,50 @@ pub fn mode_reminder(plan: bool) -> String {
 
 fn find_git_root(cwd: &Path) -> Option<PathBuf> {
     cwd.ancestors().find(|p| p.join(".git").exists()).map(Path::to_path_buf)
+}
+
+/// 生成工作区顶层文件与构建工具快照，省去模型首轮盲目调用 ls/glob 的额外往返
+fn build_workspace_snapshot(cwd: &Path) -> String {
+    let mut hints = Vec::new();
+    if cwd.join("Cargo.toml").is_file() {
+        hints.push("Rust (Cargo.toml): verify changes with `cargo test` or `cargo check`");
+    }
+    if cwd.join("package.json").is_file() {
+        hints.push("Node/JS/TS (package.json): verify changes with `npm test` or build script");
+    }
+    if cwd.join("pyproject.toml").is_file() || cwd.join("pytest.ini").is_file() {
+        hints.push("Python: verify changes with `pytest`");
+    }
+    if cwd.join("go.mod").is_file() {
+        hints.push("Go (go.mod): verify changes with `go test ./...`");
+    }
+
+    let mut entries = Vec::new();
+    for entry in ignore::WalkBuilder::new(cwd).max_depth(Some(2)).build().flatten() {
+        if entry.depth() == 0 {
+            continue;
+        }
+        if let Ok(rel) = entry.path().strip_prefix(cwd) {
+            let mut s = rel.to_string_lossy().replace('\\', "/");
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                s.push('/');
+            }
+            entries.push(s);
+            if entries.len() >= 40 {
+                break;
+            }
+        }
+    }
+    entries.sort();
+
+    let mut out = String::new();
+    if !hints.is_empty() {
+        out.push_str(&format!("- Detected stack: {}\n", hints.join("; ")));
+    }
+    if !entries.is_empty() {
+        out.push_str(&format!("- Workspace files (depth<=2): {}\n", entries.join(", ")));
+    }
+    out
 }
 
 /// 全局指令 + 从 git 根目录到 cwd 路径上的所有指令文件（每个目录取第一个存在的）

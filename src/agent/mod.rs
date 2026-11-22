@@ -23,8 +23,8 @@ pub enum Mode {
 
 pub enum AgentEvent {
     Delta(Delta),
-    ToolCall { name: String, title: String },
-    ToolResult { name: String, ok: bool, summary: String, display: Option<String> },
+    ToolCall { id: String, name: String, title: String },
+    ToolResult { id: String, name: String, ok: bool, summary: String, display: Option<String> },
     Permission { name: String, title: String, preview: Option<String>, reply: oneshot::Sender<Decision> },
     Notice(String),
 }
@@ -104,6 +104,7 @@ impl Agent {
     }
 
     pub async fn run_turn(&mut self, input: String, tx: Tx, cancel: Arc<Notify>) -> Result<()> {
+        self.ctx.tracker.lock().unwrap().clear_backups();
         let mut blocks = vec![Block::Text { text: input }];
         if self.reminded_mode != Some(self.mode) {
             // 首轮的 Build 模式无需提醒，减少噪音
@@ -188,11 +189,15 @@ impl Agent {
                 }
                 let batch: Vec<_> = (i..j)
                     .map(|k| {
-                        let (_, name, input) = &calls[k];
+                        let (call_id, name, input) = &calls[k];
                         let tool = self.registry.get(name).unwrap();
                         let inv = tool.describe(input, &self.ctx);
-                        let _ = tx.send(AgentEvent::ToolCall { name: name.clone(), title: inv.title });
-                        run_tool(tool, input.clone(), self.ctx.clone(), name.clone(), tx.clone())
+                        let _ = tx.send(AgentEvent::ToolCall {
+                            id: call_id.clone(),
+                            name: name.clone(),
+                            title: inv.title,
+                        });
+                        run_tool(tool, input.clone(), self.ctx.clone(), call_id.clone(), name.clone(), tx.clone())
                     })
                     .collect();
                 tokio::select! {
@@ -231,8 +236,8 @@ impl Agent {
                     } else {
                         "该操作被权限规则禁止。".to_string()
                     };
-                    let _ = tx.send(AgentEvent::ToolCall { name: name.clone(), title: inv.title.clone() });
-                    let _ = tx.send(AgentEvent::ToolResult { name: name.clone(), ok: false, summary: msg.clone(), display: None });
+                    let _ = tx.send(AgentEvent::ToolCall { id: id.clone(), name: name.clone(), title: inv.title.clone() });
+                    let _ = tx.send(AgentEvent::ToolResult { id: id.clone(), name: name.clone(), ok: false, summary: msg.clone(), display: None });
                     results[i] = Some(result(id, msg, true));
                     i += 1;
                     continue;
@@ -270,9 +275,9 @@ impl Agent {
                 Action::Allow => {}
             }
 
-            let _ = tx.send(AgentEvent::ToolCall { name: name.clone(), title: inv.title });
+            let _ = tx.send(AgentEvent::ToolCall { id: id.clone(), name: name.clone(), title: inv.title });
             tokio::select! {
-                (content, is_err) = run_tool(tool, input.clone(), self.ctx.clone(), name.clone(), tx.clone()) => {
+                (content, is_err) = run_tool(tool, input.clone(), self.ctx.clone(), id.clone(), name.clone(), tx.clone()) => {
                     results[i] = Some(result(id, content, is_err));
                 }
                 _ = cancel.notified() => {
@@ -296,11 +301,19 @@ impl Agent {
     }
 }
 
-async fn run_tool(tool: Arc<dyn Tool>, input: Value, ctx: Arc<ToolCtx>, name: String, tx: Tx) -> (String, bool) {
+async fn run_tool(
+    tool: Arc<dyn Tool>,
+    input: Value,
+    ctx: Arc<ToolCtx>,
+    id: String,
+    name: String,
+    tx: Tx,
+) -> (String, bool) {
     match tool.run(input, &ctx).await {
         Ok(out) => {
             let content = truncate_middle(&out.content, MAX_TOOL_OUTPUT);
             let _ = tx.send(AgentEvent::ToolResult {
+                id,
                 name,
                 ok: true,
                 summary: summarize(&content),
@@ -310,7 +323,7 @@ async fn run_tool(tool: Arc<dyn Tool>, input: Value, ctx: Arc<ToolCtx>, name: St
         }
         Err(e) => {
             let msg = format!("错误: {:#}", e);
-            let _ = tx.send(AgentEvent::ToolResult { name, ok: false, summary: msg.clone(), display: None });
+            let _ = tx.send(AgentEvent::ToolResult { id, name, ok: false, summary: msg.clone(), display: None });
             (msg, true)
         }
     }

@@ -44,6 +44,10 @@ impl Tool for Write {
             .map_err(|e| anyhow!(e))?;
         let existed = path.exists();
         let old = if existed { std::fs::read_to_string(&path).unwrap_or_default() } else { String::new() };
+        ctx.tracker
+            .lock()
+            .unwrap()
+            .save_backup(&path, if existed { Some(old.clone()) } else { None });
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }

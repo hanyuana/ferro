@@ -55,11 +55,11 @@ impl Renderer {
                     self.last = Out::Reasoning;
                 }
             }
-            AgentEvent::ToolCall { name, title } => {
+            AgentEvent::ToolCall { name, title, .. } => {
                 self.ensure_newline();
                 println!("{} {}{}", "●".cyan(), tool_label(&name).bold(), format!("({})", title).dark_grey());
             }
-            AgentEvent::ToolResult { name, ok, summary, display } => {
+            AgentEvent::ToolResult { name, ok, summary, display, .. } => {
                 if ok {
                     match (name.as_str(), display) {
                         ("todo_write", Some(d)) => {
@@ -420,7 +420,7 @@ pub async fn run_once(mut agent: Agent, input: String, auto_yes: bool) -> anyhow
                     print!("{}", t);
                     let _ = std::io::stdout().flush();
                 }
-                AgentEvent::ToolCall { name, title } => eprintln!("● {}({})", tool_label(&name), title),
+                AgentEvent::ToolCall { name, title, .. } => eprintln!("● {}({})", tool_label(&name), title),
                 AgentEvent::ToolResult { ok: false, summary, .. } => eprintln!("  ⎿ {}", summary),
                 AgentEvent::Permission { name, title, reply, .. } => {
                     if auto_yes {

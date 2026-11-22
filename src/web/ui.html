@@ -1074,8 +1074,31 @@ let activeStepsBox = null;
 let activeElapsedLabel = null;
 let activeProseEl = null;
 let activeProseRaw = '';
+let proseRafId = 0;
 let turnEdits = [];
 let activeEditsCard = null;
+
+function flushProseRender() {
+  if (proseRafId) {
+    cancelAnimationFrame(proseRafId);
+    proseRafId = 0;
+  }
+  if (activeProseEl) {
+    activeProseEl.innerHTML = renderMarkdown(activeProseRaw);
+  }
+}
+
+function scheduleProseRender() {
+  if (proseRafId) return;
+  proseRafId = requestAnimationFrame(() => {
+    proseRafId = 0;
+    if (activeProseEl) {
+      activeProseEl.innerHTML = renderMarkdown(activeProseRaw);
+      const stream = document.getElementById('chat-stream');
+      stream.scrollTop = stream.scrollHeight;
+    }
+  });
+}
 
 async function api(url, body) {
   const r = await fetch(url, body ? {
@@ -1415,20 +1438,30 @@ function handleEvent(ev) {
     }
     r.textContent += ev.text;
   } else if (ev.type === 'tool_call') {
+    flushProseRender();
     activeProseEl = null;
     const box = ensureStepsContainer(col);
     const line = document.createElement('div');
     line.className = 'step-line';
+    if (ev.id) line.dataset.callId = ev.id;
     line.innerHTML = `<span class="dot"></span><span>${escapeHtml(ev.name)}(${escapeHtml(ev.title)})</span><span class="step-summary" style="color:var(--text-muted)"></span>`;
     box.appendChild(line);
   } else if (ev.type === 'tool_result') {
     if (activeStepsBox) {
-      const lines = activeStepsBox.querySelectorAll('.step-line');
-      const last = lines[lines.length - 1];
-      if (last) {
-        const dot = last.querySelector('.dot');
+      let target = null;
+      if (ev.id) {
+        for (const el of activeStepsBox.querySelectorAll('.step-line')) {
+          if (el.dataset.callId === ev.id) { target = el; break; }
+        }
+      }
+      if (!target) {
+        const lines = activeStepsBox.querySelectorAll('.step-line');
+        target = lines[lines.length - 1];
+      }
+      if (target) {
+        const dot = target.querySelector('.dot');
         if (dot) dot.classList.add(ev.ok ? 'ok' : 'err');
-        const sum = last.querySelector('.step-summary');
+        const sum = target.querySelector('.step-summary');
         if (sum) sum.textContent = '— ' + ev.summary;
       }
     }
@@ -1443,8 +1476,10 @@ function handleEvent(ev) {
       col.appendChild(activeProseEl);
     }
     activeProseRaw += ev.text;
-    activeProseEl.innerHTML = renderMarkdown(activeProseRaw);
+    scheduleProseRender();
+    return;
   } else if (ev.type === 'permission') {
+    flushProseRender();
     const card = document.createElement('div');
     card.className = 'perm-card';
     card.id = 'perm-' + ev.id;
@@ -1463,6 +1498,7 @@ function handleEvent(ev) {
     d.textContent = ev.text;
     col.appendChild(d);
   } else if (ev.type === 'done') {
+    flushProseRender();
     setBusy(false);
     if (activeElapsedLabel && turnStartMs) {
       const sec = Math.max(1, Math.round((Date.now() - turnStartMs) / 1000));
@@ -1531,6 +1567,7 @@ function appendEditSummary(col, summary, diffText) {
         </div>
       </div>
       <div class="edits-hdr-actions">
+        <button class="pill-btn" onclick="undoLastEdits(this)">撤销 ↶</button>
         <button class="pill-btn" onclick="toggleAllDiffs(this)">查看变更</button>
       </div>
     </div>
@@ -1545,6 +1582,16 @@ function appendEditSummary(col, summary, diffText) {
         </div>
       `).join('')}
     </div>`;
+}
+
+async function undoLastEdits(btn) {
+  btn.disabled = true;
+  const r = await api('/api/undo', {});
+  const list = r.restored || [];
+  btn.textContent = list.length ? `已撤销 (${list.length})` : '无可撤销项';
+  if (list.length) {
+    handleEvent({ type: 'notice', text: '已回滚文件修改：' + list.join(', ') });
+  }
 }
 
 function toggleAllDiffs(btn) {
@@ -1576,16 +1623,19 @@ function setBusy(b) {
 
 async function onSendOrStop() {
   if (state.busy) {
+    const btn = document.getElementById('send-btn');
+    btn.title = '正在停止…';
     await api('/api/stop', {});
     return;
   }
   const inp = document.getElementById('prompt-input');
   let text = inp.value.trim();
   if (!text && !attachedFiles.length) return;
-  if (!state.has_key && !state.model.startsWith('ollama/')) {
+  if (!state.has_key && !state.model.startsWith('ollama/') && !state.model.startsWith('magpie/')) {
     openKeyModal();
     return;
   }
+  const prevChips = [...attachedFiles];
   if (attachedFiles.length) {
     const prefix = attachedFiles.map(f => '@' + f).join(' ');
     text = text ? `${prefix}\n${text}` : prefix;
@@ -1594,10 +1644,26 @@ async function onSendOrStop() {
   }
   lastUserPrompt = text;
   closeAtPopup();
+  const prevInput = inp.value;
   inp.value = '';
   inp.style.height = 'auto';
   setBusy(true);
-  await api('/api/chat', { prompt: text });
+  try {
+    const res = await api('/api/chat', { prompt: text });
+    if (res && res.ok === false) {
+      setBusy(false);
+      inp.value = prevInput;
+      attachedFiles = prevChips;
+      renderAttachChips();
+      handleEvent({ type: 'notice', text: res.error || '发送被拒绝' });
+    }
+  } catch (err) {
+    setBusy(false);
+    inp.value = prevInput;
+    attachedFiles = prevChips;
+    renderAttachChips();
+    handleEvent({ type: 'notice', text: '网络请求失败: ' + err });
+  }
 }
 
 function sendQuick(text) {
@@ -1783,15 +1849,51 @@ function escapeAttr(s) {
   return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+function copyText(text, btn, resetLabel = '复制') {
+  const done = () => {
+    if (!btn) return;
+    btn.textContent = '已复制 ✓';
+    setTimeout(() => { btn.textContent = resetLabel; }, 1500);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+
+function fallbackCopy(text, cb) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch (_) {}
+  document.body.removeChild(ta);
+  if (cb) cb();
+}
+
+function copyCodeBlock(btn) {
+  const pre = btn.closest('.code-card')?.querySelector('pre');
+  if (pre) copyText(pre.textContent || '', btn, '复制');
+}
+
 function renderMarkdown(md) {
-  const parts = String(md || '').split(/```(\w*)\n([\s\S]*?)```/g);
+  let src = String(md || '');
+  // 若流式输出中代码块尚未闭合，自动补齐临时围栏，防止代码在流式过程中裸露抖动
+  const fenceCount = (src.match(/```/g) || []).length;
+  if (fenceCount % 2 === 1) {
+    src += '\n```';
+  }
+  const parts = src.split(/```([^\n`]*)\n([\s\S]*?)```/g);
   let html = '';
   for (let i = 0; i < parts.length; i += 3) {
     html += formatInline(parts[i]);
     if (i + 2 < parts.length) {
-      const lang = escapeHtml(parts[i + 1] || 'code');
+      const lang = escapeHtml((parts[i + 1] || '').trim() || 'code');
       const code = escapeHtml(parts[i + 2]);
-      html += `<div class="code-card"><div class="code-card-hdr"><span>${lang}</span><button class="pill-btn" style="padding:2px 8px;font-size:11px;" onclick="navigator.clipboard.writeText(this.parentElement.nextElementSibling.textContent);this.textContent='已复制'">复制</button></div><pre>${code}</pre></div>`;
+      html += `<div class="code-card"><div class="code-card-hdr"><span>${lang}</span><button class="pill-btn" style="padding:2px 8px;font-size:11px;" onclick="copyCodeBlock(this)">复制</button></div><pre>${code}</pre></div>`;
     }
   }
   return html;

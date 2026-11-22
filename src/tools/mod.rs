@@ -258,6 +258,19 @@ mod tests {
         assert!(bad.is_err());
         assert!(std::fs::read_to_string(&file).unwrap().contains("v2"));
 
+        // 4. 新建文件 + undo_all 一键回滚
+        let new_file = dir.join("created.txt");
+        reg.get("write")
+            .unwrap()
+            .run(json!({"file_path": "created.txt", "content": "hello"}), &ctx)
+            .await
+            .unwrap();
+        assert!(new_file.exists());
+        let restored = ctx.tracker.lock().unwrap().undo_all();
+        assert_eq!(restored.len(), 2);
+        assert!(std::fs::read_to_string(&file).unwrap().contains("v1"));
+        assert!(!new_file.exists());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

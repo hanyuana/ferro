@@ -85,14 +85,42 @@ fn load_for_edit(ctx: &ToolCtx, path: &Path) -> Result<String> {
 }
 
 fn finish_write(ctx: &ToolCtx, path: &Path, old: &str, new: &str) -> Result<ToolOutput> {
+    {
+        let mut tr = ctx.tracker.lock().unwrap();
+        tr.save_backup(path, Some(old.to_string()));
+    }
     std::fs::write(path, new)?;
     ctx.tracker.lock().unwrap().record(path);
     let rel = display_path(&ctx.cwd, path);
     let (a, d) = diff_stats(old, new);
+    let snippet = changed_context_snippet(old, new);
+    let content = if snippet.is_empty() {
+        format!("已修改 {}（+{} -{}）", rel, a, d)
+    } else {
+        format!("已修改 {}（+{} -{}）。修改处最新行号上下文：\n{}", rel, a, d, snippet)
+    };
     Ok(ToolOutput {
-        content: format!("已修改 {}（+{} -{}）", rel, a, d),
+        content,
         display: Some(unified_diff(&rel, old, new)),
     })
+}
+
+/// 提取修改位置附近带行号的最新代码片段，防止模型连续编辑时行号或上下文漂移
+fn changed_context_snippet(old: &str, new: &str) -> String {
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+    let first_diff = old_lines
+        .iter()
+        .zip(new_lines.iter())
+        .position(|(a, b)| a != b)
+        .unwrap_or(0);
+    let start = first_diff.saturating_sub(2);
+    let end = (first_diff + 12).min(new_lines.len());
+    let mut out = String::new();
+    for (idx, line) in new_lines[start..end].iter().enumerate() {
+        out.push_str(&format!("{:>6}\t{}\n", start + idx + 1, line));
+    }
+    out
 }
 
 pub struct Edit;

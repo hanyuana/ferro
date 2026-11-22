@@ -107,7 +107,11 @@ impl Config {
         let mut cfg: Config = merged.try_into().context("配置解析失败")?;
         cfg.import_local_magpie_and_opencode();
         cfg.add_builtin_providers();
-        cfg.ensure_local_magpie_running();
+        // 后台异步检测/拉起本地 Magpie，不阻塞客户端窗口冷启动
+        let cfg_bg = cfg.clone();
+        std::thread::spawn(move || {
+            cfg_bg.ensure_local_magpie_running();
+        });
         Ok(cfg)
     }
 
@@ -358,6 +362,7 @@ impl Config {
         };
         let client = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(30))
+            .tcp_nodelay(true)
             .build()?;
         let base_url = pc.base_url.clone().unwrap_or_default();
         let provider: Arc<dyn Provider> = match pc.kind {
