@@ -62,7 +62,40 @@ html.dark .starter-card, html.dark .edits-summary-card, html.dark .pill-btn {
   border-color: var(--border);
   color: var(--text-primary);
 }
-html.dark .user-bubble { color: #e2e8f0; }
+html.dark .brand-dot, html.dark .welcome-logo {
+  background: #2563eb;
+  color: #ffffff;
+}
+html.dark .new-chat-row {
+  background: var(--bg-canvas);
+  border-color: var(--border);
+}
+html.dark .new-chat-row:hover {
+  background: var(--bg-hover);
+}
+html.dark .model-chip, html.dark .attach-btn {
+  background: var(--bg-subtle);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+html.dark .model-chip option {
+  background: #1a1d26;
+  color: var(--text-primary);
+}
+html.dark .access-pill.build { background: rgba(251, 191, 36, 0.12); color: #fbbf24; border-color: rgba(251, 191, 36, 0.3); }
+html.dark .access-pill.plan { background: rgba(96, 165, 250, 0.14); color: #93c5fd; border-color: rgba(96, 165, 250, 0.3); }
+html.dark .key-chip.missing {
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+}
+html.dark .perm-card {
+  background: #231d10;
+  border-color: #d97706;
+}
+html.dark .perm-title { color: #fbbf24; }
+html.dark .field input:focus { background: var(--bg-canvas); }
+html.dark .user-bubble { color: #e2e8f0; border-color: rgba(96, 165, 250, 0.25); }
 html.dark .code-card, html.dark .file-modal-pre, html.dark .diff-drawer { background: #12151c; color: #e2e8f0; }
 html.dark .code-card-hdr { background: #181c26; }
 html.dark .code-card pre { color: #e2e8f0; }
@@ -159,14 +192,29 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
 /* 整体两栏式 ChatGPT 客户端骨架：左侧统一侧边栏 + 右侧圆角主工作台 */
 .client-shell {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
   height: 100vh;
   width: 100vw;
   background: var(--bg-sidebar);
   transition: grid-template-columns 0.18s ease;
+  position: relative;
 }
 .client-shell.collapsed-sidebar {
-  grid-template-columns: 0px 1fr;
+  grid-template-columns: 0px minmax(0, 1fr);
+}
+.client-shell.collapsed-sidebar .project-sidebar {
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.36);
+  z-index: 65;
 }
 
 .project-sidebar {
@@ -175,13 +223,15 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   height: 100vh;
   background: var(--bg-sidebar);
   overflow: hidden;
-  padding: 10px 10px 10px 10px;
+  padding: 10px;
+  transition: opacity 0.15s ease, transform 0.18s ease;
 }
 .sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 6px 10px;
+  padding: 2px 4px 10px;
+  flex-shrink: 0;
 }
 .app-title-btn {
   display: inline-flex;
@@ -227,18 +277,22 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 11px;
+  padding: 8px 11px;
   border-radius: 10px;
   cursor: pointer;
   color: var(--text-primary);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
   font-size: 13.5px;
-  font-weight: 500;
+  font-weight: 600;
   margin-bottom: 8px;
-  transition: background 0.12s;
+  flex-shrink: 0;
+  transition: background 0.12s, border-color 0.12s;
 }
-.new-chat-row:hover { background: var(--bg-hover); }
-.new-chat-left { display: flex; align-items: center; gap: 9px; }
-.new-chat-row svg { width: 16px; height: 16px; color: var(--text-secondary); }
+.new-chat-row:hover { background: var(--bg-hover); border-color: #cbd5e1; }
+.new-chat-left { display: flex; align-items: center; gap: 8px; }
+.new-chat-row svg { width: 15px; height: 15px; color: var(--blue); }
 
 .side-tabs {
   display: grid;
@@ -246,8 +300,9 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   background: #eceef2;
   padding: 3px;
   border-radius: 9px;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   gap: 2px;
+  flex-shrink: 0;
 }
 .side-tab {
   border: none;
@@ -270,21 +325,74 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
 
 .sidebar-scroll {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-right: 2px;
+}
+.sidebar-projects-block {
+  flex-shrink: 0;
+  margin-bottom: 4px;
+}
+.sidebar-projects-list {
+  max-height: 148px;
   overflow-y: auto;
   padding-right: 2px;
 }
-.sidebar-scroll::-webkit-scrollbar { width: 4px; }
-.sidebar-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+.sidebar-sessions-block {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-sessions-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.sidebar-alt-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.sidebar-projects-list::-webkit-scrollbar,
+.sidebar-sessions-list::-webkit-scrollbar,
+.sidebar-alt-list::-webkit-scrollbar { width: 4px; }
+.sidebar-projects-list::-webkit-scrollbar-thumb,
+.sidebar-sessions-list::-webkit-scrollbar-thumb,
+.sidebar-alt-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
 .section-label {
   font-size: 11.5px;
   font-weight: 600;
   color: var(--text-muted);
-  padding: 10px 10px 4px;
+  padding: 7px 8px 4px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
 }
+.section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 5px;
+  padding: 2px 4px;
+  margin-left: -4px;
+}
+.section-toggle:hover { color: var(--text-primary); background: var(--bg-hover); }
+.section-chevron {
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.14s ease;
+}
+.section-chevron.collapsed { transform: rotate(-90deg); }
 .section-action {
   color: var(--text-secondary);
   font-weight: 500;
@@ -339,17 +447,23 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   padding-top: 8px;
   margin-top: 6px;
   border-top: 1px solid var(--border-soft);
+  flex-shrink: 0;
 }
 
-/* 3. 右侧主工作台（圆角白色卡片画布） */
+/* 3. 右侧主工作台（圆角卡片画布） */
 .workspace-wrap {
   padding: 8px 8px 8px 0;
   height: 100vh;
+  min-width: 0;
   overflow: hidden;
   display: flex;
 }
+.client-shell.collapsed-sidebar .workspace-wrap {
+  padding-left: 8px;
+}
 .workspace-canvas {
   flex: 1;
+  min-width: 0;
   background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -391,6 +505,8 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
 /* 主画布内容区（支持右侧悬浮卡片） */
 .canvas-body {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   display: flex;
   overflow: hidden;
   position: relative;
@@ -398,20 +514,24 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
 
 .chat-stream {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
-  padding: 28px 36px 150px;
+  overflow-x: hidden;
+  padding: 24px 28px 24px;
   scroll-behavior: smooth;
   user-select: text;
 }
 .chat-stream::-webkit-scrollbar { width: 6px; }
-.chat-stream::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 6px; }
+.chat-stream::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
 
 .chat-column {
-  max-width: 720px;
+  width: 100%;
+  max-width: 760px;
+  min-width: 0;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
 }
 
 /* 右侧悬浮上下文卡片（输出内容 / 来源 / 待办，复刻截图右上角悬浮窗） */
@@ -475,25 +595,25 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
 
 /* 欢迎空状态 */
 .welcome-box {
-  margin: 56px auto 20px;
+  margin: 48px auto 16px;
   text-align: center;
-  max-width: 580px;
+  max-width: 560px;
 }
 .welcome-logo {
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
   background: #111827;
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   box-shadow: 0 8px 20px rgba(17, 24, 39, 0.12);
 }
-.welcome-logo svg { width: 24px; height: 24px; }
-.welcome-box h2 { font-size: 22px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; }
-.welcome-box p { font-size: 13.5px; color: var(--text-muted); line-height: 1.6; margin-bottom: 24px; }
+.welcome-logo svg { width: 22px; height: 22px; }
+.welcome-box h2 { font-size: 21px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
+.welcome-box p { font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-bottom: 20px; }
 .starter-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -501,7 +621,7 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   text-align: left;
 }
 .starter-card {
-  padding: 13px 15px;
+  padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: #ffffff;
@@ -514,20 +634,23 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
 }
-.starter-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
+.starter-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
 .starter-desc { font-size: 12px; color: var(--text-muted); }
 
-/* 对话气泡与流式响应（复刻截图样式） */
+/* 对话气泡与流式响应 */
 .user-bubble {
   align-self: flex-end;
   background: var(--bg-user-bubble);
   color: #0f172a;
+  border: 1px solid rgba(37, 99, 235, 0.12);
   padding: 10px 16px;
-  border-radius: 18px;
-  max-width: 78%;
+  border-radius: 18px 18px 4px 18px;
+  max-width: 82%;
   font-size: 14px;
-  line-height: 1.55;
+  line-height: 1.6;
   white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .elapsed-toggle {
@@ -548,6 +671,8 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
 }
 .step-line {
   font-size: 12.5px;
@@ -556,8 +681,10 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   align-items: center;
   gap: 7px;
   font-family: var(--font-mono);
+  min-width: 0;
+  white-space: nowrap;
 }
-.step-line .dot { width: 6px; height: 6px; border-radius: 50%; background: #94a3b8; }
+.step-line .dot { width: 6px; height: 6px; border-radius: 50%; background: #94a3b8; flex-shrink: 0; }
 .step-line .dot.ok { background: var(--green); }
 .step-line .dot.err { background: var(--red); }
 
@@ -565,6 +692,9 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   font-size: 14.5px;
   line-height: 1.75;
   color: var(--text-primary);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: break-word;
 }
 .assistant-prose p { margin-bottom: 12px; }
 .assistant-prose p:last-child { margin-bottom: 0; }
@@ -581,14 +711,16 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   border-radius: 5px;
   font-family: var(--font-mono);
   font-size: 12.5px;
+  word-break: break-all;
 }
 
 .code-card {
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
-  margin: 10px 0;
+  margin: 12px 0;
   background: #f8fafc;
+  max-width: 100%;
 }
 .code-card-hdr {
   padding: 7px 13px;
@@ -603,27 +735,36 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
 }
 .code-card pre {
   padding: 12px 14px;
+  max-width: 100%;
   overflow-x: auto;
+  white-space: pre;
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.55;
   color: #1e293b;
 }
+.code-card pre::-webkit-scrollbar,
+.diff-drawer::-webkit-scrollbar { height: 6px; }
+.code-card pre::-webkit-scrollbar-thumb,
+.diff-drawer::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
 
-/* 已编辑文件汇总卡片（1:1 复刻截图中的“已编辑 N 个文件 +121 -57”卡片） */
+/* 已编辑文件汇总与改动预览卡片 */
 .edits-summary-card {
   border: 1px solid var(--border);
   border-radius: 14px;
   background: #ffffff;
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+  max-width: 100%;
 }
 .edits-hdr {
-  padding: 12px 16px;
+  padding: 11px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border-soft);
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .edits-hdr-left {
   display: flex;
@@ -631,15 +772,16 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   gap: 10px;
 }
 .edits-icon-box {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 8px;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-secondary);
+  color: var(--blue);
+  font-weight: 700;
 }
 .edits-title { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
 .edits-stats { font-size: 12px; font-family: var(--font-mono); margin-top: 1px; }
@@ -668,26 +810,38 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   font-family: var(--font-mono);
   font-size: 12.5px;
   color: var(--text-primary);
   cursor: pointer;
 }
 .edits-file-row:hover { background: var(--bg-subtle); }
+.edits-file-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .diff-drawer {
   display: none;
-  padding: 10px 16px;
+  padding: 10px 14px;
   background: #f8fafc;
   border-top: 1px solid var(--border-soft);
   font-family: var(--font-mono);
   font-size: 12px;
-  overflow-x: auto;
+  max-width: 100%;
+  max-height: 320px;
+  overflow: auto;
   white-space: pre;
   line-height: 1.5;
 }
-.diff-line-add { background: #dcfce7; color: #166534; display: block; padding: 0 6px; }
-.diff-line-del { background: #fee2e2; color: #991b1b; display: block; padding: 0 6px; }
-.diff-line-hunk { color: var(--blue); display: block; padding: 0 6px; }
+.diff-line-add { background: #dcfce7; color: #166534; display: block; padding: 0 6px; border-radius: 3px; }
+.diff-line-del { background: #fee2e2; color: #991b1b; display: block; padding: 0 6px; border-radius: 3px; }
+.diff-line-hunk { color: var(--blue); display: block; padding: 2px 6px; font-weight: 600; }
 
 /* 权限确认卡片 */
 .perm-card {
@@ -701,31 +855,30 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
 .btn-primary { background: #111827; color: #fff; border: none; padding: 6px 14px; border-radius: 8px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .btn-secondary { background: #fff; color: var(--text-primary); border: 1px solid var(--border); padding: 6px 14px; border-radius: 8px; font-size: 12.5px; font-weight: 500; cursor: pointer; }
 
-/* 底部悬浮胶囊输入框（1:1 复刻截图底部“和 Codex 一起工作”胶囊） */
+/* 底部固定输入栏：与正文列严格对齐（760px）且不遮挡消息流 */
 .composer-dock {
-  position: absolute;
-  bottom: 18px;
-  left: 0;
-  right: 0;
+  flex-shrink: 0;
+  width: 100%;
   display: flex;
   justify-content: center;
-  padding: 0 28px;
-  pointer-events: none;
+  padding: 8px 28px 16px;
+  background: var(--bg-canvas);
+  border-top: 1px solid var(--border-soft);
 }
 .composer-pill {
-  pointer-events: auto;
   width: 100%;
-  max-width: 720px;
-  background: #ffffff;
-  border: 1px solid #d1d5db;
-  border-radius: 22px;
+  max-width: 760px;
+  margin: 0 auto;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: 18px;
   box-shadow: var(--shadow-composer);
-  padding: 12px 16px 10px;
+  padding: 11px 14px 9px;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .composer-pill:focus-within {
-  border-color: #9ca3af;
-  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.12);
+  border-color: var(--blue);
+  box-shadow: 0 10px 28px rgba(37, 99, 235, 0.10);
 }
 .composer-pill textarea {
   width: 100%;
@@ -733,74 +886,85 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
   background: transparent;
   resize: none;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--text-primary);
   min-height: 26px;
   max-height: 140px;
 }
-.composer-pill textarea::placeholder { color: #9ca3af; }
+.composer-pill textarea::placeholder { color: var(--text-muted); }
 
 .composer-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
 }
-.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 8px; }
+.toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+}
 
-.plus-btn {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
+.attach-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  transition: background 0.12s, color 0.12s;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.plus-btn:hover { background: var(--bg-subtle); color: var(--text-primary); }
-.plus-btn svg { width: 17px; height: 17px; stroke-width: 2; }
+.attach-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.attach-btn svg { width: 14px; height: 14px; stroke-width: 2; }
 
 .access-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 7px;
-  font-size: 12.5px;
-  font-weight: 500;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
-  border: none;
-  background: transparent;
+  border: 1px solid transparent;
   transition: background 0.12s;
 }
-.access-pill:hover { background: var(--bg-subtle); }
-.access-pill.build { color: #b45309; }
-.access-pill.plan { color: #1d4ed8; }
-.access-pill svg { width: 15px; height: 15px; flex-shrink: 0; }
+.access-pill.build { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+.access-pill.plan { color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }
+.access-pill:hover { filter: brightness(0.97); }
+.access-pill svg { width: 14px; height: 14px; flex-shrink: 0; }
 
 .model-chip {
-  border: none;
-  background: transparent;
-  font-size: 12.5px;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: 12px;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  max-width: 210px;
 }
-.model-chip:hover { background: var(--bg-subtle); color: var(--text-primary); }
+.model-chip:hover { background: var(--bg-hover); }
 
 .key-chip {
   border: 1px solid var(--border);
   background: var(--bg-subtle);
   font-size: 11.5px;
   color: var(--text-secondary);
-  padding: 3px 9px;
-  border-radius: 99px;
+  padding: 4px 9px;
+  border-radius: 8px;
   cursor: pointer;
 }
 .key-chip.missing {
@@ -810,21 +974,71 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
 }
 
 .send-circle {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  height: 30px;
+  min-width: 64px;
+  padding: 0 12px;
+  border-radius: 99px;
   border: none;
   background: #2563eb;
   color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   cursor: pointer;
   transition: transform 0.12s, background 0.12s;
 }
-.send-circle:hover { background: #1d4ed8; transform: scale(1.04); }
+.send-circle:hover { background: #1d4ed8; }
 .send-circle.stop { background: var(--red); }
-.send-circle svg { width: 15px; height: 15px; }
+.send-circle.stop:hover { filter: brightness(0.93); }
+.send-circle svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+/* 窄窗口响应式：自动收起侧栏，展开时作为抽屉浮层，单列欢迎卡片 */
+@media (max-width: 860px) {
+  .client-shell {
+    grid-template-columns: 0px minmax(0, 1fr);
+  }
+  .project-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 260px;
+    z-index: 70;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .client-shell.collapsed-sidebar .project-sidebar {
+    transform: translateX(-105%);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .client-shell:not(.collapsed-sidebar) .sidebar-backdrop {
+    display: block;
+  }
+  .workspace-wrap {
+    padding: 6px;
+  }
+  .chat-stream {
+    padding: 18px 16px;
+  }
+  .composer-dock {
+    padding: 8px 14px 12px;
+  }
+  .starter-grid {
+    grid-template-columns: 1fr;
+  }
+  .floating-inspector {
+    position: absolute;
+    right: 12px;
+    top: 8px;
+    z-index: 40;
+  }
+}
 
 /* 模态弹窗（配置 API Key / 预览文件） */
 .modal-mask {
@@ -876,7 +1090,8 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
 </head>
 <body>
 <div class="client-shell" id="shell">
-  <!-- 左侧 ChatGPT 风格统一侧边栏 -->
+  <div class="sidebar-backdrop" onclick="document.getElementById('shell').classList.add('collapsed-sidebar')"></div>
+  <!-- 左侧 ChatGPT 风格统一侧边栏：优先放新对话、搜索、历史项目，会话列表独立滚动并支持收起 -->
   <aside class="project-sidebar">
     <div class="sidebar-header">
       <button class="app-title-btn" onclick="newSession()">
@@ -887,7 +1102,7 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
         <button class="icon-btn-sm" title="打开本地项目文件夹" onclick="browseLocalFolder()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
         </button>
-        <button class="icon-btn-sm" title="收起侧边栏" onclick="document.getElementById('shell').classList.toggle('collapsed-sidebar')">
+        <button class="icon-btn-sm" title="收起侧边栏 (Ctrl+B)" onclick="document.getElementById('shell').classList.toggle('collapsed-sidebar')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
         </button>
       </div>
@@ -895,27 +1110,26 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
 
     <div class="new-chat-row" onclick="newSession()">
       <div class="new-chat-left">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         <span>新对话</span>
       </div>
-      <span style="font-size:11px;color:var(--text-muted);">Ctrl+N</span>
+      <span style="font-size:11px;color:var(--text-muted);font-weight:500;">Ctrl+N</span>
     </div>
 
-    <div class="side-search-wrap">
+    <div class="side-search-wrap" style="flex-shrink:0;">
       <svg class="side-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input class="side-search" id="sidebar-search" placeholder="搜索对话或文件 (Ctrl+K)" oninput="onSearchInput(this.value)">
-    </div>
-
-    <div class="side-tabs">
-      <button class="side-tab active" id="rail-projects" onclick="switchRail('projects')">对话</button>
-      <button class="side-tab" id="rail-files" onclick="switchRail('files')">文件</button>
-      <button class="side-tab" id="rail-memory" onclick="switchRail('memory')">记忆</button>
-      <button class="side-tab" id="rail-skills" onclick="switchRail('skills')">技能</button>
+      <input class="side-search" id="sidebar-search" placeholder="搜索项目或历史对话 (Ctrl+K)" oninput="onSearchInput(this.value)">
     </div>
 
     <div class="sidebar-scroll" id="sidebar-list"></div>
 
     <div class="sidebar-footer">
+      <div class="side-tabs">
+        <button class="side-tab active" id="rail-projects" onclick="switchRail('projects')">对话</button>
+        <button class="side-tab" id="rail-files" onclick="switchRail('files')">文件</button>
+        <button class="side-tab" id="rail-memory" onclick="switchRail('memory')">记忆</button>
+        <button class="side-tab" id="rail-skills" onclick="switchRail('skills')">技能</button>
+      </div>
       <div class="nav-item" onclick="openKeyModal()">
         <div class="nav-item-left">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -925,12 +1139,12 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
     </div>
   </aside>
 
-  <!-- 右侧圆角白底主工作台 -->
+  <!-- 右侧圆角主工作台 -->
   <div class="workspace-wrap">
     <main class="workspace-canvas">
       <header class="canvas-topbar">
         <div style="display:flex;align-items:center;gap:6px;">
-          <button class="icon-btn-sm" title="展开/收起侧边栏" onclick="document.getElementById('shell').classList.toggle('collapsed-sidebar')">
+          <button class="icon-btn-sm" title="展开/收起侧边栏 (Ctrl+B)" onclick="document.getElementById('shell').classList.toggle('collapsed-sidebar')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
           <button class="workspace-folder-pill" id="top-folder-btn" onclick="browseLocalFolder()" title="点击选择并切换本地工作区文件夹">
@@ -976,28 +1190,29 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
         </aside>
       </div>
 
-      <!-- 底部悬浮胶囊输入栏 -->
+      <!-- 底部固定输入栏：与正文 760px 对齐，清晰区分附件、权限、模型与发送/停止 -->
       <div class="composer-dock">
         <div class="composer-pill" style="position:relative;">
           <div class="at-popup" id="at-popup"></div>
           <div class="attach-chips" id="attach-chips"></div>
-          <textarea id="prompt-input" rows="1" placeholder="和 Ferro 一起工作（输入 @ 引用文件，Shift+Enter 换行）" oninput="onComposerInput(this)" onkeydown="onComposerKey(event)"></textarea>
+          <textarea id="prompt-input" rows="1" placeholder="输入问题或编码指令（输入 @ 引用工作区文件，Shift+Enter 换行）" oninput="onComposerInput(this)" onkeydown="onComposerKey(event)"></textarea>
           <div class="composer-toolbar">
             <div class="toolbar-left">
-              <button class="plus-btn" title="插入文件引用 (@)" onclick="switchRail('files')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <button class="attach-btn" title="添加工作区文件附件 (@)" onclick="openAttachPicker()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                <span>附件</span>
               </button>
+              <span class="toolbar-sep"></span>
               <button class="access-pill build" id="mode-pill" onclick="toggleMode()" title="点击切换完全访问 (BUILD) / 只读规划 (PLAN)">
                 <span id="mode-icon" style="display:inline-flex;align-items:center;">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                 </span>
                 <span id="mode-label">完全访问</span>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
             </div>
             <div class="toolbar-right">
-              <button class="key-chip" id="key-chip" onclick="openKeyModal()">配置 Key</button>
-              <select class="model-chip" id="model-select" onchange="onModelSelect(this.value)">
+              <button class="key-chip" id="key-chip" onclick="openKeyModal()" title="配置模型或 API Key">配置 Key</button>
+              <select class="model-chip" id="model-select" title="切换当前对话模型" onchange="onModelSelect(this.value)">
                 <option value="deepseek/deepseek-chat">DeepSeek V3</option>
                 <option value="deepseek/deepseek-reasoner">DeepSeek R1</option>
                 <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5</option>
@@ -1008,6 +1223,7 @@ button, input, select, textarea { font-family: inherit; color: inherit; outline:
               </select>
               <button class="send-circle" id="send-btn" onclick="onSendOrStop()" title="发送 (Enter)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+                <span>发送</span>
               </button>
             </div>
           </div>
@@ -1206,6 +1422,47 @@ let attachedFiles = [];
 let lastUserPrompt = '';
 let atMatches = [];
 let atSelected = 0;
+let projectsCollapsed = false;
+let sessionsCollapsed = false;
+
+const narrowMq = window.matchMedia('(max-width: 860px)');
+function applyResponsiveSidebar(e) {
+  const shell = document.getElementById('shell');
+  if (!shell) return;
+  if (e.matches) {
+    shell.classList.add('collapsed-sidebar');
+  } else {
+    shell.classList.remove('collapsed-sidebar');
+  }
+}
+applyResponsiveSidebar(narrowMq);
+if (narrowMq.addEventListener) {
+  narrowMq.addEventListener('change', applyResponsiveSidebar);
+}
+
+function toggleSection(sec) {
+  if (sec === 'projects') {
+    projectsCollapsed = !projectsCollapsed;
+  } else if (sec === 'sessions') {
+    sessionsCollapsed = !sessionsCollapsed;
+  }
+  renderSidebar();
+}
+
+function openAttachPicker() {
+  const inp = document.getElementById('prompt-input');
+  const files = state.files || [];
+  if (!files.length) {
+    switchRail('files');
+    return;
+  }
+  if (!inp.value.endsWith('@')) {
+    inp.value = (inp.value && !inp.value.endsWith(' ') ? inp.value + ' @' : inp.value + '@');
+  }
+  inp.focus();
+  inp.selectionStart = inp.selectionEnd = inp.value.length;
+  updateAtPopup(inp);
+}
 
 function onSearchInput(v) {
   searchQuery = (v || '').trim().toLowerCase();
@@ -1252,7 +1509,8 @@ function renderSidebar() {
       ? state.projects
       : [{ name: document.getElementById('top-folder-name').textContent, path: state.cwd, active: true }];
     const filteredProjs = q ? projs.filter(p => p.name.toLowerCase().includes(q)) : projs;
-    const projHtml = `<div class="section-label"><span>项目工作区</span><span class="section-action" onclick="browseLocalFolder()">+ 打开目录</span></div>` +
+    const projChevron = projectsCollapsed ? 'collapsed' : '';
+    const projListHtml = projectsCollapsed ? '' : `<div class="sidebar-projects-list">` +
       filteredProjs.map(p => `
         <div class="nav-item ${p.active ? 'active' : ''}" title="${escapeAttr(p.path)}" onclick="switchProject('${escapeAttr(p.path)}')">
           <div class="nav-item-left">
@@ -1262,10 +1520,23 @@ function renderSidebar() {
           <div style="display:flex;align-items:center;gap:4px;">
             ${p.active ? '<span class="active-dot" title="当前工作区"></span>' : `<button class="nav-del" title="从列表移除" onclick="event.stopPropagation();removeProject('${escapeAttr(p.path)}')">×</button>`}
           </div>
-        </div>`).join('');
+        </div>`).join('') + `</div>`;
+
+    const projBlock = `
+      <div class="sidebar-projects-block">
+        <div class="section-label">
+          <span class="section-toggle" onclick="toggleSection('projects')">
+            <span class="section-chevron ${projChevron}">▾</span>
+            <span>历史项目 (${filteredProjs.length})</span>
+          </span>
+          <span class="section-action" onclick="browseLocalFolder()">+ 打开目录</span>
+        </div>
+        ${projListHtml}
+      </div>`;
 
     const sessions = (state.sessions || []).filter(s => !q || (s.title || '').toLowerCase().includes(q));
-    const sessHtml = `<div class="section-label" style="margin-top:8px;"><span>历史对话</span></div>` +
+    const sessChevron = sessionsCollapsed ? 'collapsed' : '';
+    const sessListHtml = sessionsCollapsed ? '' : `<div class="sidebar-sessions-list">` +
       (sessions.length ? sessions.map(s => `
         <div class="nav-item ${s.active ? 'active' : ''}" onclick="loadSession('${escapeAttr(s.id)}')">
           <div class="nav-item-left">
@@ -1273,12 +1544,24 @@ function renderSidebar() {
             <span class="nav-item-text">${escapeHtml(s.title)}</span>
           </div>
           <button class="nav-del" title="删除会话" onclick="event.stopPropagation();deleteSession('${escapeAttr(s.id)}')">×</button>
-        </div>`).join('') : `<div style="padding:8px 10px;color:var(--text-muted);font-size:12px;">${q ? '无匹配的历史对话' : '当前项目暂无历史对话'}</div>`);
+        </div>`).join('') : `<div style="padding:8px 10px;color:var(--text-muted);font-size:12px;">${q ? '无匹配的历史对话' : '当前项目暂无历史对话'}</div>`) +
+      `</div>`;
 
-    box.innerHTML = projHtml + sessHtml;
+    const sessBlock = `
+      <div class="sidebar-sessions-block">
+        <div class="section-label">
+          <span class="section-toggle" onclick="toggleSection('sessions')">
+            <span class="section-chevron ${sessChevron}">▾</span>
+            <span>历史对话 (${sessions.length})</span>
+          </span>
+        </div>
+        ${sessListHtml}
+      </div>`;
+
+    box.innerHTML = projBlock + sessBlock;
   } else if (state.rail === 'files') {
     const files = (state.files || []).filter(f => !q || f.toLowerCase().includes(q));
-    box.innerHTML = `<div class="section-label"><span>工作区文件 (${files.length})</span></div>` +
+    box.innerHTML = `<div class="section-label"><span>工作区文件 (${files.length})</span></div><div class="sidebar-alt-list">` +
       files.map(f => `
         <div class="nav-item" onclick="openFileModal('${escapeAttr(f)}')">
           <div class="nav-item-left">
@@ -1286,24 +1569,24 @@ function renderSidebar() {
             <span class="nav-item-text">${escapeHtml(f)}</span>
           </div>
           <span style="font-size:11px;color:var(--blue);flex-shrink:0;" onclick="event.stopPropagation();attachFile('${escapeAttr(f)}')">@引用</span>
-        </div>`).join('');
+        </div>`).join('') + `</div>`;
   } else if (state.rail === 'memory') {
     const items = (state.memories || []).map(m => `
       <div style="background:var(--bg-canvas);border:1px solid var(--border);border-radius:9px;padding:9px 11px;margin:6px 4px;font-size:12px;color:var(--text-primary);white-space:pre-wrap;">${escapeHtml(m)}</div>`).join('');
     box.innerHTML = `
       <div class="section-label"><span>持久记忆 (MEMORY.md)</span></div>
-      <div style="padding:4px;display:flex;gap:4px;">
+      <div style="padding:4px;display:flex;gap:4px;flex-shrink:0;">
         <input id="mem-inp" placeholder="添加新项目记忆..." style="flex:1;padding:6px 9px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg-canvas);">
         <button class="pill-btn" onclick="addMemory()">添加</button>
       </div>
-      ${items || '<div style="padding:10px;color:var(--text-muted);font-size:12px;">暂无记忆，Agent 会在任务中自动沉淀</div>'}`;
+      <div class="sidebar-alt-list">${items || '<div style="padding:10px;color:var(--text-muted);font-size:12px;">暂无记忆，Agent 会在任务中自动沉淀</div>'}</div>`;
   } else if (state.rail === 'skills') {
-    box.innerHTML = `<div class="section-label"><span>技能库 (SKILL.md)</span></div>` +
+    box.innerHTML = `<div class="section-label"><span>技能库 (SKILL.md)</span></div><div class="sidebar-alt-list">` +
       ((state.skills || []).map(s => `
         <div class="nav-item" style="flex-direction:column;align-items:flex-start;gap:2px;" onclick="openSkillModal('${escapeAttr(s.name)}')">
           <div style="font-weight:600;color:var(--text-primary);">${escapeHtml(s.name)}</div>
           <div style="font-size:11.5px;color:var(--text-muted);">${escapeHtml(s.description)}</div>
-        </div>`).join('') || '<div style="padding:10px;color:var(--text-muted);font-size:12px;">暂无技能</div>');
+        </div>`).join('') || '<div style="padding:10px;color:var(--text-muted);font-size:12px;">暂无技能</div>') + `</div>`;
   }
 }
 
@@ -1362,24 +1645,24 @@ function renderWelcomeIfNeeded() {
       <div class="welcome-logo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
       </div>
-      <h2>和 Ferro 一起工作</h2>
-      <p>纯 Rust 原生轻量客户端 · 支持读写并发工具调度、文件修改回滚、持久记忆与技能沉淀</p>
+      <h2>有什么可以帮你的？</h2>
+      <p>本地原生编码助手 · 支持并发工具、改动预览与一键回滚</p>
       <div class="starter-grid">
         <div class="starter-card" onclick="sendQuick('请浏览当前工作区的目录与核心代码，总结架构设计与模块职责。')">
           <div class="starter-title">梳理项目架构</div>
-          <div class="starter-desc">并发读取目录与关键源码，生成结构化架构说明</div>
+          <div class="starter-desc">快速读取核心源码并生成架构概览</div>
         </div>
         <div class="starter-card" onclick="sendQuick('检查当前项目的代码质量与潜在 Bug，并直接修复发现的问题。')">
-          <div class="starter-title">排查潜在问题并修复</div>
-          <div class="starter-desc">精准修改代码并展示可视化变更统计与 Diff</div>
+          <div class="starter-title">排查并修复问题</div>
+          <div class="starter-desc">精准修改代码并展示 Diff 预览</div>
         </div>
         <div class="starter-card" onclick="sendQuick('运行项目的单元测试套件，分析结果并补充缺失的测试用例。')">
-          <div class="starter-title">运行并补充单元测试</div>
-          <div class="starter-desc">调用终端命令验证构建与测试通过率</div>
+          <div class="starter-title">运行与补充测试</div>
+          <div class="starter-desc">执行测试命令并验证改动正确性</div>
         </div>
         <div class="starter-card" onclick="sendQuick('将当前项目的构建命令、目录规范记录到项目持久记忆 MEMORY.md 中。')">
-          <div class="starter-title">沉淀项目持久记忆</div>
-          <div class="starter-desc">保存关键上下文，让后续每次会话自动具备记忆</div>
+          <div class="starter-title">沉淀项目记忆</div>
+          <div class="starter-desc">保存关键规范到 MEMORY.md</div>
         </div>
       </div>
     </div>`;
@@ -1485,7 +1768,7 @@ function handleEvent(ev) {
     card.id = 'perm-' + ev.id;
     card.innerHTML = `
       <div class="perm-title">⚠ 需要授权执行：${escapeHtml(ev.name)}(${escapeHtml(ev.title)})</div>
-      ${ev.preview ? `<pre style="background:#fff;border:1px solid var(--border);padding:8px 10px;border-radius:8px;font-family:var(--font-mono);font-size:12px;max-height:200px;overflow:auto;">${escapeHtml(ev.preview)}</pre>` : ''}
+      ${ev.preview ? `<pre style="background:var(--bg-canvas);border:1px solid var(--border);padding:8px 10px;border-radius:8px;font-family:var(--font-mono);font-size:12px;max-height:200px;overflow:auto;">${escapeHtml(ev.preview)}</pre>` : ''}
       <div class="perm-btns">
         <button class="btn-primary" onclick="replyPerm(${ev.id}, 'once')">允许本次</button>
         <button class="btn-secondary" onclick="replyPerm(${ev.id}, 'always')">始终允许</button>
@@ -1514,9 +1797,7 @@ function handleEvent(ev) {
         <button class="msg-act-btn" title="复制整条回答">复制</button>
         ${retryPrompt ? '<button class="msg-act-btn" title="重新发送上一条问题">重新生成</button>' : ''}`;
       bar.children[0].onclick = () => {
-        navigator.clipboard.writeText(rawCopy);
-        bar.children[0].textContent = '已复制';
-        setTimeout(() => { bar.children[0].textContent = '复制'; }, 1500);
+        copyText(rawCopy, bar.children[0], '复制');
       };
       if (retryPrompt && bar.children[1]) {
         bar.children[1].onclick = () => sendQuick(retryPrompt);
@@ -1538,7 +1819,7 @@ function handleEvent(ev) {
   stream.scrollTop = stream.scrollHeight;
 }
 
-/* 复刻截图中的“已编辑 N 个文件 +121 -57”聚合卡片 */
+/* 聚合改动预览卡片：支持逐文件展开 Diff、一键查看全部与一键回滚 */
 function appendEditSummary(col, summary, diffText) {
   const lines = String(diffText || '').split('\n');
   let file = summary.replace(/^已(修改|覆盖|创建)\s+/, '').split('（')[0].trim();
@@ -1560,9 +1841,9 @@ function appendEditSummary(col, summary, diffText) {
   activeEditsCard.innerHTML = `
     <div class="edits-hdr">
       <div class="edits-hdr-left">
-        <div class="edits-icon-box">+</div>
+        <div class="edits-icon-box">Δ</div>
         <div>
-          <div class="edits-title">已编辑 ${turnEdits.length} 个文件</div>
+          <div class="edits-title">改动预览 · 已编辑 ${turnEdits.length} 个文件</div>
           <div class="edits-stats"><span class="stat-add">+${totalAdd}</span><span class="stat-del">-${totalDel}</span></div>
         </div>
       </div>
@@ -1575,7 +1856,7 @@ function appendEditSummary(col, summary, diffText) {
       ${turnEdits.map((e, idx) => `
         <div>
           <div class="edits-file-row" onclick="const d=document.getElementById('diff-item-${idx}');d.style.display=d.style.display==='block'?'none':'block'">
-            <span>${escapeHtml(e.file)}</span>
+            <span class="edits-file-name"><span>▸</span><span>${escapeHtml(e.file)}</span></span>
             <span><span class="stat-add">+${e.add}</span> <span class="stat-del">-${e.del}</span></span>
           </div>
           <div class="diff-drawer" id="diff-item-${idx}">${renderDiffLines(e.diff)}</div>
@@ -1616,9 +1897,10 @@ function setBusy(b) {
   state.busy = b;
   const btn = document.getElementById('send-btn');
   btn.classList.toggle('stop', b);
+  btn.title = b ? '停止生成' : '发送 (Enter)';
   btn.innerHTML = b
-    ? `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`
-    : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`;
+    ? `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>停止</span>`
+    : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg><span>发送</span>`;
 }
 
 async function onSendOrStop() {
