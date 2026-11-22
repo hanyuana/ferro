@@ -1,13 +1,22 @@
 [package]
 name = "ferro"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A lightweight, native AI coding agent written in Rust"
 license = "MIT"
 
+[features]
+default = []
+installer = []
+
 [[bin]]
 name = "ferro"
 path = "src/main.rs"
+
+[[bin]]
+name = "ferro-setup"
+path = "src/bin/ferro-setup.rs"
+required-features = ["installer"]
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "fs", "sync", "time", "signal", "net"] }

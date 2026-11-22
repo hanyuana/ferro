@@ -24,6 +24,7 @@ pub fn run(agent: Agent, config: Config) -> anyhow::Result<()> {
         renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
             .with_title("Ferro · workspace")
+            .with_icon(Arc::new(app_icon()))
             .with_inner_size([1220.0, 820.0])
             .with_min_inner_size([760.0, 520.0]),
         ..Default::default()
@@ -549,4 +550,13 @@ fn install_fonts(ctx: &egui::Context) {
         }
     }
     ctx.set_fonts(fonts);
+}
+
+pub fn app_icon() -> egui::IconData {
+    const RGBA: &[u8] = include_bytes!("../../assets/icon_64_rgba.bin");
+    egui::IconData {
+        rgba: RGBA.to_vec(),
+        width: 64,
+        height: 64,
+    }
 }

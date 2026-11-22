@@ -1,4 +1,6 @@
 /target
-*.baseline.exe
+/dist
+/*.exe
 .ferro/
+
 

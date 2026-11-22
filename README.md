@@ -13,6 +13,38 @@ Ferro 本身无需注册或登录。生成回答需要一个可用的模型，�
 - **审阅与回滚**：在改动卡片中检查文件差异。撤销依赖当前运行中的文件快照，重要改动请同时用 Git 审阅和管理。
 - **本地记录**：保存对话历史，支持项目记忆和技能说明。使用远程模型时，模型所需的提示词和代码上下文会发往配置的服务端。
 
+## 下载与安装（Windows x64）
+
+当前已构建并实机验证的预编译安装包仅面向 **Windows x64**（macOS 暂不提供未实机验证的预编译安装包，请参考下方“从源码开始（macOS）”在 Mac 本机编译）。
+
+1. **下载安装包与校验文件**：
+   前往 [GitHub Releases (hanyuana/ferro)](https://github.com/hanyuana/ferro/releases/tag/v0.2.0) 下载：
+   - `Ferro-Setup-0.2.0-x64.exe`（Windows x64 独立图形安装程序，内含原生 `ferro.exe`、多尺寸图标与卸载器）
+   - `Ferro-Setup-0.2.0-x64.exe.sha256`（SHA-256 校验值文件）
+
+2. **核对 SHA-256 校验值**：
+   在 PowerShell 中运行以下命令，确认输出的 Hash 与 `.sha256` 文件完全一致：
+   ```powershell
+   Get-FileHash .\Ferro-Setup-0.2.0-x64.exe -Algorithm SHA256
+   Get-Content .\Ferro-Setup-0.2.0-x64.exe.sha256
+   ```
+
+3. **双击安装、自定义目录与卸载**：
+   - 双击 `Ferro-Setup-0.2.0-x64.exe` 打开原生安装向导。
+   - **默认按当前用户安装**到 `%LOCALAPPDATA%\Programs\Ferro`（无需管理员权限），也可点击 **`浏览…`** 自由选择任意安装目录。
+   - 安装完成后程序名为 `ferro.exe`，默认创建开始菜单快捷方式 `Ferro` 与 `Uninstall Ferro`。
+   - **升级与卸载说明**：重新运行安装器覆盖升级，或通过开始菜单 / 安装目录下的 `uninstall.exe` 卸载程序时，仅移除程序文件与快捷方式，**会完整保留 `%APPDATA%\ferro` 下的历史会话（`sessions/`）与配置文件（`config.toml`）**。
+
+4. **代码签名状态说明**：
+   - 当前发布的 `Ferro-Setup-0.2.0-x64.exe` 与 `ferro.exe` **未附加商业 Authenticode 代码签名证书（Unsigned）**。
+   - **请勿关闭 Windows Defender、SmartScreen 或任何系统安全防护**；建议在运行前通过上方 `Get-FileHash` 核对 GitHub Release 公布的 SHA-256 校验值，或直接从本仓库源码自行编译。
+
+5. **无需 Magpie 的首次配置步骤（打开即用）**：
+   - 安装后从开始菜单或安装目录启动 `ferro.exe`（无需浏览器、无需注册账号、无需安装 Magpie）。
+   - 点击窗口顶部栏的 **`Model setup`**：
+     - **连接本机 Ollama**：点击弹窗内的 `Ollama` 快捷按钮，在 `ollama/` 后填入本机已有的模型名（如 `ollama/qwen2.5-coder:7b`），Base URL 保持 `http://localhost:11434/v1`，API Key 留空，勾选 `Save to global config` 后点击 `Apply`。
+     - **连接自有 OpenAI / Anthropic / DeepSeek 兼容 API**：在 `Provider/model` 填入 `deepseek/deepseek-chat`（或自定义 `myproxy/model-name`），填入服务商的 `Base URL`（如 `https://api.deepseek.com/v1`）与 `API Key`（或 `env:DEEPSEEK_API_KEY`），勾选 `Save to global config` 后点击 `Apply`。
+
 ## 从源码开始（Windows）
 
 准备 Git 和 Rust 工具链。使用 Rust 的 Windows MSVC 工具链时，还需要 Visual Studio C++ Build Tools（GNU 工具链可直接纯 Rust 编译）。Ferro 默认启动基于 `egui` (`eframe` / `glow`) 的纯原生独立桌面窗口，不启动任何外部浏览器（Edge/Chrome）子进程，也不监听本地网页端口。
