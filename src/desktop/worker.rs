@@ -8,7 +8,6 @@ use std::sync::Mutex;
 pub enum Command {
     Turn { id: u64, prompt: String, mode: Mode, cancel: Arc<Notify> },
     Workspace(PathBuf),
-    PickFolder,
     Reopen(String),
     DeleteSession(String),
     New,
@@ -92,7 +91,7 @@ where
                     send(Event::Sessions(history::search_sessions(&agent.ctx.cwd, query)));
                     continue;
                 }
-                let mut reset = matches!(&command, Command::Workspace(_) | Command::PickFolder | Command::New | Command::Reopen(_));
+                let mut reset = matches!(&command, Command::Workspace(_) | Command::New | Command::Reopen(_));
                 let result: anyhow::Result<()> = async {
                     match command {
                         Command::Turn { id, prompt, mode, cancel } => {
@@ -116,11 +115,6 @@ where
                             send(Event::Done(id));
                         }
                         Command::Workspace(path) => switch(&mut agent, &mut config, path)?,
-                        Command::PickFolder => {
-                            if let Some(path) = rfd::FileDialog::new().set_directory(&agent.ctx.cwd).pick_folder() {
-                                switch(&mut agent, &mut config, path)?;
-                            }
-                        }
                         Command::Reopen(id) => {
                             anyhow::ensure!(history::search_sessions(&agent.ctx.cwd, "").iter().any(|s| s.id == id), "Session is not in this workspace");
                             let messages = history::load_session(&id).ok_or_else(|| anyhow::anyhow!("Unable to load session"))?;

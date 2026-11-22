@@ -20,6 +20,7 @@ pub fn run(agent: Agent, config: Config) -> anyhow::Result<()> {
         perm_tool_output: String::new(),
         stop_notice: String::new(),
     });
+    let state_file = std::env::var_os("FERRO_DESKTOP_STATE_FILE").map(PathBuf::from);
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
@@ -36,7 +37,7 @@ pub fn run(agent: Agent, config: Config) -> anyhow::Result<()> {
             search: String::new(), active: None, next_turn: 0, pending: None, loading: true,
             settings: false, model: String::new(), url: String::new(), key: String::new(),
             anthropic: false, persist: false, plan: initial_plan, notice: String::new(), dark: true,
-            autorun }))
+            ime_composing: false, folder_rx: None, autorun, state_file, last_state_dump: String::new() }))
     })).map_err(|e| anyhow::anyhow!("Native window: {e}"))
 }
 
@@ -115,7 +116,9 @@ struct Desktop {
     rows: Vec<Row>, input: String, search: String, active: Option<(u64, Arc<Notify>)>, next_turn: u64,
     pending: Option<Approval>, loading: bool, settings: bool, model: String, url: String, key: String,
     anthropic: bool, persist: bool, plan: bool, notice: String, dark: bool,
+    ime_composing: bool, folder_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     autorun: Option<Autorun>,
+    state_file: Option<PathBuf>, last_state_dump: String,
 }
 impl Desktop {
     fn command(&mut self, command: Command) {
@@ -222,13 +225,81 @@ impl Desktop {
     }
 }
 impl eframe::App for Desktop {
-    fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.events();
-        if self.active.is_some() || self.autorun.is_some() {
+        if let Some(rx) = &self.folder_rx {
+            match rx.try_recv() {
+                Ok(Some(chosen)) => {
+                    self.folder_rx = None;
+                    self.search.clear();
+                    self.command(Command::Workspace(chosen));
+                }
+                Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.folder_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if self.active.is_some() || self.loading || self.folder_rx.is_some() || self.autorun.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(80));
         }
         ctx.set_visuals(if self.dark { egui::Visuals::dark() } else { egui::Visuals::light() });
-        let idle = self.active.is_none() && !self.loading;
+        let idle = self.active.is_none() && !self.loading && self.folder_rx.is_none();
+        let mut open_project_clicked = false;
+        let mut open_btn_rect = egui::Rect::NOTHING;
+        let mut composer_rect = egui::Rect::NOTHING;
+        if let Some(sf) = &self.state_file {
+            let trig = sf.with_extension("trigger");
+            if let Ok(cmd) = std::fs::read_to_string(&trig) {
+                let _ = std::fs::remove_file(&trig);
+                let cmd = cmd.trim();
+                let composer_id = egui::Id::new("composer_input");
+                if cmd == "open_project" && idle {
+                    open_project_clicked = true;
+                } else if cmd == "focus_composer" {
+                    ctx.memory_mut(|m| m.request_focus(composer_id));
+                } else if cmd == "ctrl_enter" {
+                    ctx.memory_mut(|m| m.request_focus(composer_id));
+                    ctx.input_mut(|i| {
+                        i.events.push(egui::Event::Key {
+                            key: egui::Key::Enter,
+                            physical_key: Some(egui::Key::Enter),
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers { ctrl: true, command: true, ..Default::default() },
+                        });
+                    });
+                } else if cmd == "plain_enter" {
+                    ctx.memory_mut(|m| m.request_focus(composer_id));
+                    ctx.input_mut(|i| {
+                        i.events.push(egui::Event::Key {
+                            key: egui::Key::Enter,
+                            physical_key: Some(egui::Key::Enter),
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        });
+                    });
+                } else if let Some(txt) = cmd.strip_prefix("text:") {
+                    ctx.memory_mut(|m| m.request_focus(composer_id));
+                    ctx.input_mut(|i| i.events.push(egui::Event::Text(txt.to_string())));
+                } else if let Some(txt) = cmd.strip_prefix("ime_commit:") {
+                    ctx.memory_mut(|m| m.request_focus(composer_id));
+                    ctx.input_mut(|i| {
+                        i.events.push(egui::Event::Ime(egui::ImeEvent::Commit(txt.to_string())));
+                        i.events.push(egui::Event::Key {
+                            key: egui::Key::Enter,
+                            physical_key: Some(egui::Key::Enter),
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers { ctrl: true, command: true, ..Default::default() },
+                        });
+                    });
+                }
+            }
+            ctx.request_repaint_after(std::time::Duration::from_millis(80));
+        }
+
         egui::TopBottomPanel::top("masthead").show(ctx, |ui| {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -248,7 +319,9 @@ impl eframe::App for Desktop {
         egui::SidePanel::left("workspace").default_width(250.0).resizable(true).show(ctx, |ui| {
             ui.add_space(12.0); ui.heading("Workspace");
             if let Some(s) = &self.state { ui.label(s.cwd.display().to_string()); }
-            if ui.add_enabled(idle, egui::Button::new("Open project…")).clicked() { self.command(Command::PickFolder); }
+            let open_resp = ui.add_enabled(idle, egui::Button::new("Open project…"));
+            open_btn_rect = open_resp.rect;
+            if open_resp.clicked() { open_project_clicked = true; }
             ui.separator();
             let recent = self.state.as_ref().map(|s| s.recent.clone()).unwrap_or_default();
             egui::CollapsingHeader::new("Recent workspaces").default_open(true).show(ui, |ui| {
@@ -295,10 +368,21 @@ impl eframe::App for Desktop {
                     if s.todos != "(空)" { ui.collapsing("Tasks", |ui| { ui.label(&s.todos); }); }
                 }
             });
-            let edit = ui.add(egui::TextEdit::multiline(&mut self.input).desired_rows(3).desired_width(f32::INFINITY).hint_text("Describe a task · @path adds a file · Ctrl/Cmd+Enter sends"));
-            let shortcut = edit.has_focus() && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter));
+            let composer_id = egui::Id::new("composer_input");
+            let composer_focused = ctx.memory(|m| m.has_focus(composer_id));
+            let shortcut = ctx.input_mut(|i| {
+                consume_send_shortcut(&mut i.events, &mut self.ime_composing, composer_focused)
+            });
+            let edit = ui.add(
+                egui::TextEdit::multiline(&mut self.input)
+                    .id(composer_id)
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("Describe a task · @path adds a file · Ctrl/Cmd+Enter sends"),
+            );
+            composer_rect = edit.rect;
             ui.horizontal(|ui| {
-                if ui.add_enabled(idle, egui::Button::new("Send" )).clicked() || shortcut { self.send(); }
+                if ui.add_enabled(idle, egui::Button::new("Send")).clicked() || (idle && shortcut) { self.send(); }
                 if ui.add_enabled(self.active.is_some(), egui::Button::new("Stop")).clicked() { self.stop(); }
             });
         });
@@ -383,6 +467,64 @@ impl eframe::App for Desktop {
                 }
             });
             self.settings &= open;
+        }
+        if open_project_clicked && self.folder_rx.is_none() {
+            let initial = self.state.as_ref().map(|s| s.cwd.clone());
+            #[cfg(windows)]
+            {
+                let _ = frame;
+                let (ftx, frx) = std::sync::mpsc::channel();
+                let repaint = ctx.clone();
+                self.folder_rx = Some(frx);
+                std::thread::spawn(move || {
+                    let mut dlg = rfd::FileDialog::new();
+                    if let Some(dir) = initial.filter(|d| d.is_dir()) {
+                        dlg = dlg.set_directory(dir);
+                    }
+                    let chosen = dlg.pick_folder();
+                    let _ = ftx.send(chosen);
+                    repaint.request_repaint();
+                });
+            }
+            #[cfg(not(windows))]
+            {
+                let mut dlg = rfd::FileDialog::new().set_parent(frame);
+                if let Some(dir) = initial.filter(|d| d.is_dir()) {
+                    dlg = dlg.set_directory(dir);
+                }
+                if let Some(chosen) = dlg.pick_folder() {
+                    self.search.clear();
+                    self.command(Command::Workspace(chosen));
+                }
+                ctx.request_repaint();
+            }
+        }
+        if let Some(path) = &self.state_file {
+            let ppp = ctx.pixels_per_point();
+            let dump = serde_json::json!({
+                "cwd": self.state.as_ref().map(|s| s.cwd.display().to_string()).unwrap_or_default(),
+                "loading": self.loading,
+                "active": self.active.is_some(),
+                "input": self.input,
+                "notice": self.notice,
+                "rows_count": self.rows.len(),
+                "last_user_row": self.rows.iter().rev().find(|r| r.label == "You").map(|r| r.text.clone()).unwrap_or_default(),
+                "last_ferro_row": self.rows.iter().rev().find(|r| r.label == "Ferro").map(|r| r.text.clone()).unwrap_or_default(),
+                "ppp": ppp,
+                "open_btn_px": [
+                    (open_btn_rect.center().x * ppp) as i32,
+                    (open_btn_rect.center().y * ppp) as i32
+                ],
+                "composer_px": [
+                    (composer_rect.center().x * ppp) as i32,
+                    (composer_rect.center().y * ppp) as i32
+                ],
+            })
+            .to_string();
+            if dump != self.last_state_dump {
+                let _ = std::fs::write(path, &dump);
+                self.last_state_dump = dump;
+            }
         }
         self.drive_autorun(ctx);
     }
@@ -558,5 +700,134 @@ pub fn app_icon() -> egui::IconData {
         rgba: RGBA.to_vec(),
         width: 64,
         height: 64,
+    }
+}
+
+/// Inspect raw input events before `TextEdit` runs:
+/// - Tracks active IME composition (`Preedit` / `Commit` / `Disabled`) so confirming Chinese IME
+///   candidates never misfires a send.
+/// - Matches `Ctrl+Enter` / `Cmd+Enter` directly on each `Event::Key`'s own `modifiers` (avoiding
+///   stale end-of-frame `InputState::modifiers` when `Ctrl` is released in the same frame) and
+///   checks both logical `key` and `physical_key` for Windows IME/Numpad Enter compatibility.
+/// - Leaves plain `Enter` untouched so `TextEdit::multiline` inserts a newline normally.
+fn consume_send_shortcut(
+    events: &mut Vec<egui::Event>,
+    ime_composing: &mut bool,
+    composer_focused: bool,
+) -> bool {
+    let mut ime_activity_this_frame = false;
+    for ev in events.iter() {
+        if let egui::Event::Ime(ime) = ev {
+            match ime {
+                egui::ImeEvent::Preedit(text) => {
+                    *ime_composing = !text.is_empty();
+                    if !text.is_empty() {
+                        ime_activity_this_frame = true;
+                    }
+                }
+                egui::ImeEvent::Commit(_) => {
+                    *ime_composing = false;
+                    ime_activity_this_frame = true;
+                }
+                egui::ImeEvent::Disabled => {
+                    *ime_composing = false;
+                }
+                egui::ImeEvent::Enabled => {}
+            }
+        }
+    }
+
+    if !composer_focused || *ime_composing || ime_activity_this_frame {
+        return false;
+    }
+
+    let mut triggered = false;
+    events.retain(|ev| {
+        let is_send = matches!(
+            ev,
+            egui::Event::Key {
+                key,
+                physical_key,
+                pressed: true,
+                modifiers,
+                ..
+            } if (*key == egui::Key::Enter || *physical_key == Some(egui::Key::Enter))
+                && (modifiers.command || modifiers.ctrl)
+                && !modifiers.alt
+        );
+        if is_send {
+            triggered = true;
+            false // consume Ctrl/Cmd+Enter so TextEdit does not process it
+        } else {
+            true
+        }
+    });
+    triggered
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key_ev(key: egui::Key, physical_key: Option<egui::Key>, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    #[test]
+    fn ctrl_enter_sends_and_consumes_when_focused() {
+        let mut ime = false;
+        let mods = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+        let mut events = vec![key_ev(egui::Key::Enter, Some(egui::Key::Enter), mods)];
+        assert!(consume_send_shortcut(&mut events, &mut ime, true));
+        assert!(events.is_empty(), "Ctrl+Enter event should be consumed");
+    }
+
+    #[test]
+    fn plain_enter_does_not_send_and_stays_for_newline() {
+        let mut ime = false;
+        let mut events = vec![key_ev(egui::Key::Enter, Some(egui::Key::Enter), egui::Modifiers::NONE)];
+        assert!(!consume_send_shortcut(&mut events, &mut ime, true));
+        assert_eq!(events.len(), 1, "plain Enter must pass through to TextEdit for newline");
+    }
+
+    #[test]
+    fn ime_preedit_and_commit_prevent_misfire() {
+        let mut ime = false;
+        let mods = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+
+        // During Chinese IME preedit, neither Enter nor Ctrl+Enter should misfire send
+        let mut ev1 = vec![
+            egui::Event::Ime(egui::ImeEvent::Preedit("nihao".into())),
+            key_ev(egui::Key::Enter, Some(egui::Key::Enter), mods),
+        ];
+        assert!(!consume_send_shortcut(&mut ev1, &mut ime, true));
+        assert!(ime);
+
+        // Same-frame IME Commit (confirming Chinese candidate) must not trigger send
+        let mut ev2 = vec![
+            egui::Event::Ime(egui::ImeEvent::Commit("你好".into())),
+            key_ev(egui::Key::Enter, Some(egui::Key::Enter), mods),
+        ];
+        assert!(!consume_send_shortcut(&mut ev2, &mut ime, true));
+        assert!(!ime);
+
+        // Next frame after IME commit finishes, Ctrl+Enter sends normally
+        let mut ev3 = vec![key_ev(egui::Key::Enter, Some(egui::Key::Enter), mods)];
+        assert!(consume_send_shortcut(&mut ev3, &mut ime, true));
+    }
+
+    #[test]
+    fn unfocused_composer_ignores_ctrl_enter() {
+        let mut ime = false;
+        let mods = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+        let mut events = vec![key_ev(egui::Key::Enter, Some(egui::Key::Enter), mods)];
+        assert!(!consume_send_shortcut(&mut events, &mut ime, false));
+        assert_eq!(events.len(), 1);
     }
 }
