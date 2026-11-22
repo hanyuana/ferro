@@ -68,8 +68,7 @@ enum Cmd {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     #[cfg(windows)]
     if std::env::args_os().len() > 1 {
         extern "system" {
@@ -137,12 +136,21 @@ async fn main() -> Result<()> {
         }
     }
 
-    match cli.prompt {
-        Some(p) => repl::run_once(agent, p, cli.yes).await,
-        None if cli.no_tui => repl::run_interactive(agent, cfg).await,
-        None if cli.tui => tui::run_tui(agent, cfg).await,
-        None => desktop::run(agent, cfg),
+    if cli.prompt.is_none() && !cli.no_tui && !cli.tui {
+        return desktop::run(agent, cfg);
     }
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()?;
+    rt.block_on(async move {
+        match cli.prompt {
+            Some(p) => repl::run_once(agent, p, cli.yes).await,
+            None if cli.no_tui => repl::run_interactive(agent, cfg).await,
+            _ => tui::run_tui(agent, cfg).await,
+        }
+    })
 }
 
 fn resolve_initial_cwd(cli_cwd: Option<PathBuf>) -> PathBuf {

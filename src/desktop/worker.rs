@@ -17,11 +17,10 @@ pub enum Command {
     Search(String),
 }
 pub struct Snapshot {
-    pub reset_transcript: bool,
     pub cwd: PathBuf,
     pub model: String,
-    pub config: Config,
-    pub messages: Vec<Message>,
+    pub config: Arc<Config>,
+    pub transcript: Option<Vec<super::Row>>,
     pub sessions: Vec<history::SessionInfo>,
     pub recent: Vec<PathBuf>,
     pub todos: String,
@@ -35,11 +34,13 @@ pub enum Event {
     Sessions(Vec<history::SessionInfo>),
 }
 
-fn snapshot(agent: &Agent, config: &Config, reset_transcript: bool) -> Snapshot {
+fn snapshot(agent: &Agent, config: &Arc<Config>, reset_transcript: bool) -> Snapshot {
     Snapshot {
-        reset_transcript,
-        cwd: agent.ctx.cwd.clone(), model: agent.model_ref.clone(), config: config.clone(),
-        messages: agent.messages.clone(), sessions: history::list_sessions(&agent.ctx.cwd),
+        cwd: agent.ctx.cwd.clone(),
+        model: agent.model_ref.clone(),
+        config: Arc::clone(config),
+        transcript: reset_transcript.then(|| super::transcript(&agent.messages)),
+        sessions: history::list_sessions(&agent.ctx.cwd),
         recent: crate::workspace::load_recent_projects(),
         todos: crate::session::render_todos(&agent.ctx.todos.lock().unwrap()),
         usage: format!("Tokens  {} in / {} out", agent.usage.input, agent.usage.output),
@@ -56,20 +57,33 @@ pub fn spawn(
 
 pub fn spawn_with_notify<F>(
     mut agent: Agent,
-    mut config: Config,
+    config: Config,
     notify: F,
 ) -> (mpsc::UnboundedSender<Command>, std::sync::mpsc::Receiver<Event>)
 where
     F: Fn() + Send + Sync + 'static,
 {
+    let mut config = Arc::new(config);
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (events, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let send = |event| {
+        let mut last_notify = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(1))
+            .unwrap_or_else(std::time::Instant::now);
+        let mut send = |event: Event| {
+            let is_delta = matches!(&event, Event::Agent(_, AgentEvent::Delta(_)));
             let _ = events.send(event);
-            notify();
+            let now = std::time::Instant::now();
+            if !is_delta || now.duration_since(last_notify) >= std::time::Duration::from_millis(16) {
+                last_notify = now;
+                notify();
+            }
         };
-        let runtime = tokio::runtime::Runtime::new().expect("desktop worker runtime");
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("desktop worker runtime");
         runtime.block_on(async {
             crate::workspace::record_recent_project(&agent.ctx.cwd);
             send(Event::State(snapshot(&agent, &config, true)));
@@ -78,7 +92,7 @@ where
                     send(Event::Sessions(history::search_sessions(&agent.ctx.cwd, query)));
                     continue;
                 }
-                let reset = matches!(&command, Command::Workspace(_) | Command::PickFolder | Command::New | Command::Reopen(_));
+                let mut reset = matches!(&command, Command::Workspace(_) | Command::PickFolder | Command::New | Command::Reopen(_));
                 let result: anyhow::Result<()> = async {
                     match command {
                         Command::Turn { id, prompt, mode, cancel } => {
@@ -119,6 +133,7 @@ where
                             if history::delete_session(&id) && agent.session_id == id {
                                 agent.clear();
                                 agent.ctx.tracker.lock().unwrap().clear_backups();
+                                reset = true;
                             }
                         }
                         Command::New => {
@@ -133,7 +148,7 @@ where
                             let (pid, name) = model.split_once('/').ok_or_else(|| anyhow::anyhow!("Use provider/model"))?;
                             anyhow::ensure!(!pid.is_empty() && !name.is_empty(), "Provider and model are required");
                             anyhow::ensure!(url.starts_with("https://") || url.starts_with("http://"), "Base URL must use http:// or https://");
-                            let mut next = config.clone();
+                            let mut next = (*config).clone();
                             let mut pc = next.provider.get(pid).cloned().unwrap_or(ProviderConfig {
                                 kind: ProviderKind::Openai, base_url: None, api_key: None,
                                 max_tokens: None, thinking_budget: 0, reasoning_passback: None,
@@ -148,7 +163,7 @@ where
                             agent.provider = provider;
                             agent.model = name;
                             agent.model_ref = model;
-                            config = next;
+                            config = Arc::new(next);
                         }
                         Command::Search(query) => {
                             send(Event::Sessions(history::search_sessions(&agent.ctx.cwd, &query)));
@@ -165,7 +180,7 @@ where
     (tx, receiver)
 }
 
-fn switch(agent: &mut Agent, config: &mut Config, path: PathBuf) -> anyhow::Result<()> {
+fn switch(agent: &mut Agent, config: &mut Arc<Config>, path: PathBuf) -> anyhow::Result<()> {
     let path = std::fs::canonicalize(path)?;
     let path = crate::strip_unc(path);
     anyhow::ensure!(path.is_dir() && !crate::workspace::is_system_dir(&path), "Choose a project directory");
@@ -177,7 +192,7 @@ fn switch(agent: &mut Agent, config: &mut Config, path: PathBuf) -> anyhow::Resu
         tracker: Arc::new(Mutex::new(FileTracker::default())), todos: Arc::new(Mutex::new(Vec::new())) });
     *agent = Agent::new(provider, model_name, model, build_system_prompt(&path, &shell), ctx,
         Permissions::new(&next.permission), agent.mode, next.max_steps.unwrap_or(50));
-    *config = next;
+    *config = Arc::new(next);
     crate::workspace::record_recent_project(&path);
     Ok(())
 }

@@ -65,26 +65,24 @@ pub struct SessionInfo {
     pub count: usize,
 }
 
-/// 从用户消息中提取会话标题（跳过系统提醒与 @文件 附件内容）
-fn title_of(messages: &[Message]) -> String {
-    for m in messages {
-        if m.role != Role::User {
-            continue;
-        }
-        for b in &m.content {
-            if let Block::Text { text } = b {
-                if text.starts_with("<system-reminder>") {
-                    continue;
-                }
-                let main = text.split("\n\n<file").next().unwrap_or(text);
-                let first = main.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
-                if !first.is_empty() {
-                    return first.chars().take(40).collect();
-                }
+/// 从单条用户消息中尝试提取会话标题（跳过系统提醒与 @文件 附件内容）
+fn extract_title_from_msg(m: &Message) -> Option<String> {
+    if m.role != Role::User {
+        return None;
+    }
+    for b in &m.content {
+        if let Block::Text { text } = b {
+            if text.starts_with("<system-reminder>") {
+                continue;
+            }
+            let main = text.split("\n\n<file").next().unwrap_or(text);
+            let first = main.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+            if !first.is_empty() {
+                return Some(first.chars().take(40).collect());
             }
         }
     }
-    "新会话".into()
+    None
 }
 
 fn read_session_file(path: &Path) -> Option<(SessionHeader, Vec<Message>)> {
@@ -93,6 +91,49 @@ fn read_session_file(path: &Path) -> Option<(SessionHeader, Vec<Message>)> {
     let hdr: SessionHeader = serde_json::from_str(lines.next()?).ok()?;
     let msgs = lines.filter_map(|l| serde_json::from_str::<Message>(l).ok()).collect();
     Some((hdr, msgs))
+}
+
+/// 流式扫描会话元数据：仅解析首行 Header 与首条用户消息标题，其余行仅计数，避免反序列化整份历史消息与工具大输出
+fn read_session_info(path: &Path, cwd_str: &str) -> Option<SessionInfo> {
+    use std::io::{BufRead, BufReader};
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    if reader.read_line(&mut line).ok()? == 0 {
+        return None;
+    }
+    let hdr: SessionHeader = serde_json::from_str(line.trim_end()).ok()?;
+    if !hdr.cwd.eq_ignore_ascii_case(cwd_str) {
+        return None;
+    }
+    let mut title: Option<String> = None;
+    let mut count = 0usize;
+    loop {
+        line.clear();
+        let n = reader.read_line(&mut line).ok()?;
+        if n == 0 {
+            break;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        count += 1;
+        if title.is_none() {
+            if let Ok(msg) = serde_json::from_str::<Message>(trimmed) {
+                title = extract_title_from_msg(&msg);
+            }
+        }
+    }
+    if count == 0 {
+        return None;
+    }
+    Some(SessionInfo {
+        id: hdr.id,
+        title: title.unwrap_or_else(|| "新会话".into()),
+        created_at: hdr.created_at,
+        count,
+    })
 }
 
 /// 列出某个工作区下的历史会话（按时间倒序）
@@ -105,14 +146,7 @@ pub fn list_sessions(cwd: &Path) -> Vec<SessionInfo> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl"))
-        .filter_map(|p| read_session_file(&p))
-        .filter(|(h, msgs)| h.cwd.eq_ignore_ascii_case(&cwd_str) && !msgs.is_empty())
-        .map(|(h, msgs)| SessionInfo {
-            title: title_of(&msgs),
-            count: msgs.len(),
-            id: h.id,
-            created_at: h.created_at,
-        })
+        .filter_map(|p| read_session_info(&p, &cwd_str))
         .collect();
     out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     out.truncate(50);
@@ -122,15 +156,20 @@ pub fn list_sessions(cwd: &Path) -> Vec<SessionInfo> {
 /// Workspace-scoped full text search for the desktop history picker.
 pub fn search_sessions(cwd: &Path, query: &str) -> Vec<SessionInfo> {
     let terms: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    if terms.is_empty() {
+        return list_sessions(cwd);
+    }
     let Ok(entries) = std::fs::read_dir(sessions_dir()) else { return Vec::new() };
+    let cwd_str = cwd.to_string_lossy();
     let mut matches = Vec::new();
     for entry in entries.flatten() {
-        if entry.path().extension().and_then(|s| s.to_str()) != Some("jsonl") { continue; }
-        let Some((header, messages)) = read_session_file(&entry.path()) else { continue };
-        if !header.cwd.eq_ignore_ascii_case(&cwd.to_string_lossy()) { continue; }
-        let text = serde_json::to_string(&messages).unwrap_or_default().to_lowercase();
-        if terms.iter().all(|term| text.contains(term)) && !messages.is_empty() {
-            matches.push(SessionInfo { id: header.id, title: title_of(&messages), count: messages.len(), created_at: header.created_at });
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("jsonl") { continue; }
+        let Some(info) = read_session_info(&path, &cwd_str) else { continue };
+        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+        let lower = raw.to_lowercase();
+        if terms.iter().all(|term| lower.contains(term)) {
+            matches.push(info);
         }
     }
     matches.sort_by(|a, b| b.created_at.cmp(&a.created_at));

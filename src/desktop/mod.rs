@@ -47,7 +47,67 @@ struct Autorun {
     perm_tool_output: String,
     stop_notice: String,
 }
-struct Row { label: String, text: String, tool_id: Option<String> }
+enum Segment {
+    Prose(String),
+    Code { lang: String, code: String },
+}
+
+pub struct Row {
+    pub label: String,
+    pub text: String,
+    pub tool_id: Option<String>,
+    segments: Vec<Segment>,
+    height: f32,
+}
+
+impl Row {
+    pub fn new(label: impl Into<String>, text: impl Into<String>, tool_id: Option<String>) -> Self {
+        let label = label.into();
+        let text = text.into();
+        let segments = if tool_id.is_some() || label == "Thinking" {
+            Vec::new()
+        } else {
+            parse_segments(&text)
+        };
+        Self { label, text, tool_id, segments, height: 0.0 }
+    }
+
+    fn set_text(&mut self, label: String, text: String) {
+        self.label = label;
+        self.text = text;
+        self.segments = if self.tool_id.is_some() || self.label == "Thinking" {
+            Vec::new()
+        } else {
+            parse_segments(&self.text)
+        };
+        self.height = 0.0;
+    }
+
+    fn push_delta(&mut self, delta: &str) {
+        self.text.push_str(delta);
+        if self.tool_id.is_none() && self.label != "Thinking" {
+            self.segments = parse_segments(&self.text);
+        }
+        self.height = 0.0;
+    }
+}
+
+fn parse_segments(text: &str) -> Vec<Segment> {
+    let mut out = Vec::new();
+    for (index, part) in text.split("```").enumerate() {
+        if index % 2 == 1 {
+            let (lang, code) = part.split_once('\n').unwrap_or(("", part));
+            out.push(Segment::Code {
+                lang: lang.trim().to_string(),
+                code: code.to_string(),
+            });
+        } else if !part.is_empty() {
+            out.push(Segment::Prose(part.to_string()));
+        }
+    }
+    out
+}
+
 struct Approval { title: String, preview: String, reply: oneshot::Sender<Decision> }
 struct Desktop {
     tx: mpsc::UnboundedSender<Command>, rx: std::sync::mpsc::Receiver<Event>, state: Option<Snapshot>,
@@ -68,45 +128,72 @@ impl Desktop {
         self.pending.take();
     }
     fn events(&mut self) {
-        // Bound work per frame so long streams cannot starve input or window resize.
-        for _ in 0..256 {
+        // Coalesce all pending delta chunks while bounding non-delta transitions per frame.
+        let mut non_delta = 0usize;
+        while non_delta < 256 {
             let Ok(event) = self.rx.try_recv() else { break };
             match event {
-                Event::State(state) => {
-                    if state.reset_transcript { self.rows = transcript(&state.messages); }
+                Event::State(mut state) => {
+                    non_delta += 1;
+                    if let Some(rows) = state.transcript.take() {
+                        self.rows = rows;
+                    }
                     self.loading = false;
                     self.state = Some(state);
                 }
                 Event::Done(id) if self.active.as_ref().map(|a| a.0) == Some(id) => {
+                    non_delta += 1;
                     self.pending.take(); self.active = None; self.loading = true;
                 }
                 Event::Agent(id, event) if self.active.as_ref().map(|a| a.0) == Some(id) => {
                     match event {
-                        AgentEvent::Delta(Delta::Text(text)) => self.append("Ferro", text),
-                        AgentEvent::Delta(Delta::Reasoning(text)) => self.append("Thinking", text),
-                        AgentEvent::ToolCall { id, name, title } => self.rows.push(Row { label: format!("Running · {name}"), text: title, tool_id: Some(id) }),
+                        AgentEvent::Delta(Delta::Text(text)) => self.append("Ferro", &text),
+                        AgentEvent::Delta(Delta::Reasoning(text)) => self.append("Thinking", &text),
+                        AgentEvent::ToolCall { id, name, title } => {
+                            non_delta += 1;
+                            self.rows.push(Row::new(format!("Running · {name}"), title, Some(id)));
+                        }
                         AgentEvent::ToolResult { id, name, ok, summary, display } => {
+                            non_delta += 1;
                             let label = format!("{} · {name}", if ok { "Done" } else { "Failed" });
                             let text = display.map(|d| format!("{summary}\n\n{d}")).unwrap_or(summary);
                             if let Some(row) = self.rows.iter_mut().find(|r| r.tool_id.as_ref() == Some(&id)) {
-                                row.label = label; row.text = text;
-                            } else { self.rows.push(Row { label, text, tool_id: Some(id) }); }
+                                row.set_text(label, text);
+                            } else {
+                                self.rows.push(Row::new(label, text, Some(id)));
+                            }
                         }
                         AgentEvent::Permission { name, title, preview, reply } => {
+                            non_delta += 1;
                             self.pending = Some(Approval { title: format!("{name}: {title}"), preview: preview.unwrap_or_default(), reply });
                         }
-                        AgentEvent::Notice(text) => self.notice = text,
+                        AgentEvent::Notice(text) => {
+                            non_delta += 1;
+                            self.notice = text;
+                        }
                     }
                 }
-                Event::Notice(text) => self.notice = text,
-                Event::Sessions(sessions) => { if let Some(s) = &mut self.state { s.sessions = sessions; } self.loading = false; }
-                _ => {} // Old turn events (including approval senders) are dropped.
+                Event::Notice(text) => {
+                    non_delta += 1;
+                    self.notice = text;
+                }
+                Event::Sessions(sessions) => {
+                    non_delta += 1;
+                    if let Some(s) = &mut self.state { s.sessions = sessions; }
+                    self.loading = false;
+                }
+                _ => {
+                    non_delta += 1;
+                }
             }
         }
     }
-    fn append(&mut self, label: &str, text: String) {
-        if let Some(row) = self.rows.last_mut().filter(|r| r.label == label && r.tool_id.is_none()) { row.text.push_str(&text); }
-        else { self.rows.push(Row { label: label.into(), text, tool_id: None }); }
+    fn append(&mut self, label: &str, text: &str) {
+        if let Some(row) = self.rows.last_mut().filter(|r| r.label == label && r.tool_id.is_none()) {
+            row.push_delta(text);
+        } else {
+            self.rows.push(Row::new(label, text, None));
+        }
     }
     fn send(&mut self) {
         if self.input.trim().is_empty() || self.active.is_some() || self.loading { return; }
@@ -114,7 +201,7 @@ impl Desktop {
         let id = self.next_turn;
         let cancel = Arc::new(Notify::new());
         let prompt = std::mem::take(&mut self.input);
-        self.rows.push(Row { label: "You".into(), text: prompt.clone(), tool_id: None });
+        self.rows.push(Row::new("You", prompt.clone(), None));
         self.active = Some((id, cancel.clone()));
         self.notice.clear();
         if self.tx.send(Command::Turn { id, prompt, cancel, mode: if self.plan { Mode::Plan } else { Mode::Build } }).is_err() {
@@ -136,7 +223,9 @@ impl Desktop {
 impl eframe::App for Desktop {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.events();
-        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        if self.active.is_some() || self.autorun.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(80));
+        }
         ctx.set_visuals(if self.dark { egui::Visuals::dark() } else { egui::Visuals::light() });
         let idle = self.active.is_none() && !self.loading;
         egui::TopBottomPanel::top("masthead").show(ctx, |ui| {
@@ -219,9 +308,21 @@ impl eframe::App for Desktop {
                     ui.label("Choose a project, configure a model, then start a conversation.");
                     ui.label("Ferro needs no account. Use Ollama or an existing API.");
                 }
-                for (index, row) in self.rows.iter().enumerate() {
+                let total = self.rows.len();
+                let clip = ui.clip_rect();
+                for (index, row) in self.rows.iter_mut().enumerate() {
+                    // Viewport culling for already-measured off-screen rows (keeps 100% history intact).
+                    if row.height > 0.0 && index + 2 < total {
+                        let top = ui.cursor().min.y;
+                        let bottom = top + row.height;
+                        if bottom < clip.min.y - 400.0 || top > clip.max.y + 400.0 {
+                            ui.allocate_space(egui::vec2(ui.available_width(), row.height));
+                            ui.add_space(10.0);
+                            continue;
+                        }
+                    }
                     ui.push_id(index, |ui| {
-                        egui::Frame::group(ui.style()).inner_margin(14.0).show(ui, |ui| {
+                        let resp = egui::Frame::group(ui.style()).inner_margin(14.0).show(ui, |ui| {
                             ui.set_min_width((ui.available_width() - 8.0).max(0.0));
                             ui.horizontal(|ui| {
                                 ui.strong(&row.label);
@@ -229,8 +330,11 @@ impl eframe::App for Desktop {
                             });
                             if row.tool_id.is_some() || row.label == "Thinking" {
                                 ui.collapsing("Details / diff", |ui| { render_text(ui, &row.text); });
-                            } else { render_text(ui, &row.text); }
+                            } else {
+                                render_segments(ui, &row.segments);
+                            }
                         });
+                        row.height = resp.response.rect.height();
                         ui.add_space(10.0);
                     });
                 }
@@ -364,8 +468,8 @@ impl Desktop {
 }
 impl Drop for Desktop { fn drop(&mut self) { self.stop(); } }
 
-fn transcript(messages: &[Message]) -> Vec<Row> {
-    let mut rows = Vec::new();
+pub fn transcript(messages: &[Message]) -> Vec<Row> {
+    let mut rows = Vec::with_capacity(messages.len());
     for message in messages {
         for block in &message.content {
             let (label, text, id) = match block {
@@ -382,10 +486,31 @@ fn transcript(messages: &[Message]) -> Vec<Row> {
                 Block::ToolResult { tool_use_id, content, is_error } => (if *is_error { "Failed" } else { "Result" }.into(), content.clone(), Some(tool_use_id.clone())),
                 _ => continue,
             };
-            rows.push(Row { label, text, tool_id: id });
+            rows.push(Row::new(label, text, id));
         }
     }
     rows
+}
+
+fn render_segments(ui: &mut egui::Ui, segments: &[Segment]) {
+    for seg in segments {
+        match seg {
+            Segment::Prose(part) => {
+                ui.add(egui::Label::new(part).wrap().selectable(true));
+            }
+            Segment::Code { lang, code } => {
+                ui.horizontal(|ui| {
+                    ui.small(lang);
+                    if ui.small_button("Copy code").clicked() {
+                        ui.ctx().copy_text(code.clone());
+                    }
+                });
+                egui::ScrollArea::horizontal().id_salt(ui.next_auto_id()).show(ui, |ui| {
+                    ui.add(egui::Label::new(egui::RichText::new(code).monospace()).selectable(true));
+                });
+            }
+        }
+    }
 }
 
 fn render_text(ui: &mut egui::Ui, text: &str) {
@@ -406,7 +531,8 @@ fn render_text(ui: &mut egui::Ui, text: &str) {
 fn install_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     let paths = if cfg!(windows) {
-        vec![PathBuf::from("C:/Windows/Fonts/msyh.ttc"), PathBuf::from("C:/Windows/Fonts/simhei.ttf")]
+        // Prefer single-face TTF (simhei.ttf ~9.7 MB) over multi-face TTC (msyh.ttc ~19.6 MB) to cut font atlas RAM in half.
+        vec![PathBuf::from("C:/Windows/Fonts/simhei.ttf"), PathBuf::from("C:/Windows/Fonts/msyh.ttc")]
     } else if cfg!(target_os = "macos") {
         vec![PathBuf::from("/System/Library/Fonts/PingFang.ttc"), PathBuf::from("/System/Library/Fonts/STHeiti Medium.ttc")]
     } else {

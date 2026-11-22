@@ -22,13 +22,14 @@ git clone https://github.com/hanyuana/ferro.git
 Set-Location ferro
 cargo build --release --locked
 cargo test --locked
-.\target\release\ferro.exe
+Copy-Item -Force .\target\release\ferro.exe .\ferro.exe
+.\ferro.exe
 ```
 
-编译产物位于 `target\release\ferro.exe`。首次打开后可通过左侧栏 `Open project…` 选择要工作的目录，也可以在启动时直接指定目录：
+编译产物位于 `target\release\ferro.exe`（在仓库根目录同步交付为 `ferro.exe`）。首次双击或命令行运行 `.\ferro.exe` 打开后，可通过左侧栏 `Open project…` 选择要工作的目录，也可以在启动时直接指定目录：
 
 ```powershell
-.\target\release\ferro.exe -C 'D:\dev\my-project'
+.\ferro.exe -C 'D:\dev\my-project'
 ```
 
 ## 从源码开始（macOS）
