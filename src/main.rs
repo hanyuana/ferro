@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), windows_subsystem = "windows")]
+#![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
 
 mod agent;
 mod ai;
@@ -8,7 +8,8 @@ mod repl;
 mod session;
 mod tools;
 mod tui;
-mod web;
+mod desktop;
+mod workspace;
 
 use agent::{permission::Permissions, prompt::build_system_prompt, Agent, Mode};
 use anyhow::Result;
@@ -54,10 +55,6 @@ struct Cli {
     #[arg(long)]
     no_tui: bool,
 
-    /// 图形界面本地服务端口（默认自动分配空闲端口）
-    #[arg(long)]
-    port: Option<u16>,
-
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -77,9 +74,14 @@ async fn main() -> Result<()> {
     if std::env::args_os().len() > 1 {
         extern "system" {
             fn AttachConsole(dwProcessId: u32) -> i32;
+            fn GetStdHandle(nStdHandle: u32) -> isize;
         }
         unsafe {
-            AttachConsole(u32::MAX);
+            const STD_OUTPUT_HANDLE: u32 = (-11i32) as u32;
+            let h = GetStdHandle(STD_OUTPUT_HANDLE);
+            if h == 0 || h == -1 {
+                AttachConsole(u32::MAX);
+            }
         }
     }
 
@@ -139,7 +141,7 @@ async fn main() -> Result<()> {
         Some(p) => repl::run_once(agent, p, cli.yes).await,
         None if cli.no_tui => repl::run_interactive(agent, cfg).await,
         None if cli.tui => tui::run_tui(agent, cfg).await,
-        None => web::run_gui(agent, cfg, cli.port).await,
+        None => desktop::run(agent, cfg),
     }
 }
 
@@ -149,17 +151,17 @@ fn resolve_initial_cwd(cli_cwd: Option<PathBuf>) -> PathBuf {
     }
     if let Ok(cur) = std::env::current_dir() {
         let cur = strip_unc(std::fs::canonicalize(&cur).unwrap_or(cur));
-        if !web::is_system_dir(&cur) {
+        if !workspace::is_system_dir(&cur) {
             return cur;
         }
     }
-    if let Some(recent) = web::load_recent_projects().into_iter().next() {
+    if let Some(recent) = workspace::load_recent_projects().into_iter().next() {
         return recent;
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let dir = strip_unc(dir.to_path_buf());
-            if !web::is_system_dir(&dir) {
+            if !workspace::is_system_dir(&dir) {
                 return dir;
             }
         }

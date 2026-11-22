@@ -27,7 +27,8 @@ pub fn new_session_id() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    format!("{}_{}", ts, std::process::id())
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    format!("{}_{}_{}", ts, std::process::id(), SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
 }
 
 pub fn save_session(id: &str, cwd: &Path, messages: &[Message]) -> Result<()> {
@@ -116,6 +117,25 @@ pub fn list_sessions(cwd: &Path) -> Vec<SessionInfo> {
     out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     out.truncate(50);
     out
+}
+
+/// Workspace-scoped full text search for the desktop history picker.
+pub fn search_sessions(cwd: &Path, query: &str) -> Vec<SessionInfo> {
+    let terms: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    let Ok(entries) = std::fs::read_dir(sessions_dir()) else { return Vec::new() };
+    let mut matches = Vec::new();
+    for entry in entries.flatten() {
+        if entry.path().extension().and_then(|s| s.to_str()) != Some("jsonl") { continue; }
+        let Some((header, messages)) = read_session_file(&entry.path()) else { continue };
+        if !header.cwd.eq_ignore_ascii_case(&cwd.to_string_lossy()) { continue; }
+        let text = serde_json::to_string(&messages).unwrap_or_default().to_lowercase();
+        if terms.iter().all(|term| text.contains(term)) && !messages.is_empty() {
+            matches.push(SessionInfo { id: header.id, title: title_of(&messages), count: messages.len(), created_at: header.created_at });
+        }
+    }
+    matches.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    matches.truncate(50);
+    matches
 }
 
 /// 按 ID 加载会话消息

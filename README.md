@@ -15,7 +15,7 @@ Ferro 本身无需注册或登录。生成回答需要一个可用的模型，�
 
 ## 从源码开始（Windows）
 
-准备 Git 和 Rust 工具链。使用 Rust 的 Windows MSVC 工具链时，还需要 Visual Studio C++ Build Tools。Ferro 默认借助本机的 Edge 或 Chrome 打开单独的桌面窗口。
+准备 Git 和 Rust 工具链。使用 Rust 的 Windows MSVC 工具链时，还需要 Visual Studio C++ Build Tools（GNU 工具链可直接纯 Rust 编译）。Ferro 默认启动基于 `egui` (`eframe` / `glow`) 的纯原生独立桌面窗口，不启动任何外部浏览器（Edge/Chrome）子进程，也不监听本地网页端口。
 
 ```powershell
 git clone https://github.com/hanyuana/ferro.git
@@ -25,13 +25,54 @@ cargo test --locked
 .\target\release\ferro.exe
 ```
 
-编译产物位于 `target\release\ferro.exe`。首次打开后选择要工作的目录。也可以直接指定目录：
+编译产物位于 `target\release\ferro.exe`。首次打开后可通过左侧栏 `Open project…` 选择要工作的目录，也可以在启动时直接指定目录：
 
 ```powershell
 .\target\release\ferro.exe -C 'D:\dev\my-project'
 ```
 
-当前验证以 Windows 为主。其他平台的桌面入口尚未完成验收，可先从终端模式试用。
+## 从源码开始（macOS）
+
+需要 Git、Rust 稳定版工具链和 Apple Command Line Tools（未安装时运行 `xcode-select --install`）。在要运行 Ferro 的 Mac 上原生编译：Apple Silicon 使用 `aarch64-apple-darwin` 工具链，Intel 使用 `x86_64-apple-darwin`。
+
+```sh
+git clone https://github.com/hanyuana/ferro.git
+cd ferro
+cargo build --release --locked
+cargo test --locked
+```
+
+编译产物是 `target/release/ferro`。下面的首次对话路径无需 Ferro 登录或 Magpie，也不会下载模型。
+
+### 使用已有 Ollama 模型开始对话
+
+确认本机 Ollama 服务已经运行；用 `ollama list` 找到**已安装**模型的完整名称（包括标签），替换下面的 `YOUR_INSTALLED_MODEL`。如果列表为空，需自行准备模型或使用下一节已有 API。
+
+```sh
+ollama list
+./target/release/ferro -C "$HOME/path/to/project" --model 'ollama/YOUR_INSTALLED_MODEL'
+```
+
+`-C` 指向已存在的项目目录。默认连接 `http://localhost:11434/v1`，无需 Key。Ferro 直接打开独立原生 `egui` 桌面窗口（无本地 HTTP/SSE 端口，也不调用浏览器）。
+
+点击左侧栏的 `Open project…` 按钮，会通过 `rfd` 打开系统原生文件夹选择对话框；选择目录后将在后台 worker 中切换工作区并重新加载该目录的配置与会话历史；取消则保留当前目录。也可点击顶部 `Model setup` 在窗口内直接调整 `provider/model`、Base URL 与 API Key。
+
+在底部输入框发送“只回复 hello，不调用工具”（点击 `Send` 或按 `Ctrl/Cmd+Enter`）以确认首次对话连通。模型支持工具调用时，再试只读项目分析。也可在终端直接检查同一个模型：
+
+```sh
+./target/release/ferro -C "$HOME/path/to/project" --model 'ollama/YOUR_INSTALLED_MODEL' --plan -p 'Reply hello without using tools.'
+```
+
+### 使用已有兼容 API 开始对话
+
+在目标项目的 `.ferro/config.toml` 中使用下方“方案 B”的配置，把 Base URL 和模型 ID 替换为服务商实际值。然后在同一终端设置 Key 并启动（`myproxy/my-coding-model` 对应该配置）：
+
+```sh
+export FERRO_PROVIDER_KEY='YOUR_EXISTING_API_KEY'
+./target/release/ferro -C "$HOME/path/to/project" --model 'myproxy/my-coding-model'
+```
+
+发送同样的 hello 消息。Ferro 不需要账号；API 服务商可能需要自己的账号和有效密钥。macOS 全局配置路径为 `~/Library/Application Support/ferro/config.toml`，项目配置为 `<project>/.ferro/config.toml`，后者覆盖前者；`--model` 优先于配置。`--tui` 和 `--no-tui` 仍可用于终端会话。
 
 ## 连接模型
 
@@ -108,14 +149,21 @@ edit = "ask"
 
 | 现象 | 检查方式 |
 | --- | --- |
-| 窗口打开了，但发不出消息 | 检查所选模型、API Key 和服务地址。只有客户端时可以打开界面，生成回答仍需要模型。 |
+| 窗口打开了，但发不出消息 | 点击顶部 `Model setup` 检查所选模型、API Key 和服务地址。只有客户端时可以打开界面，生成回答仍需要模型。 |
 | Ollama 连接被拒绝 | 确认 Ollama 在运行，并检查本机端口和实际模型名。 |
 | API 返回 401、404 或模型不存在 | 分别检查密钥、Base URL、模型 ID 和服务账号权限。 |
-| 能聊天，但不会修改文件 | 检查模型是否支持工具调用，以及 Ferro 的模式和工具权限。 |
-| Windows 下双击未打开桌面 | 检查本机浏览器；可先用 `--tui` 验证核心功能。 |
+| 能聊天，但不会修改文件 | 检查模型是否支持工具调用、底部 `PLAN (read only)` 是否被勾选，以及工具权限配置。 |
+| 桌面窗口中文显示异常 | Ferro 默认自动加载系统字体（Windows `msyh.ttc`/`simhei.ttf`，macOS `PingFang.ttc`）；也可通过环境变量 `FERRO_CJK_FONT` 指定自定义 TTF/TTC 字体路径。 |
+| 无图形环境或远程 SSH 会话 | 原生桌面窗口需要本地图形桌面会话与 OpenGL (`glow`) 支持；在无头或 SSH 环境下请使用 `--tui`、`--no-tui` 或 `-p` 命令行模式。 |
 
 ## 当前验证范围
 
-Windows 上已验证通过本机 Magpie 进行流式对话、保存和重新打开会话，也用本地模拟服务验证了不经过 Magpie 的 OpenAI 兼容流式连接。真实 Ollama、新 Windows 用户首次配置和非 Windows 桌面体验仍待完整验收。
+- **Windows（已在实机验证）**：
+  - 纯原生 `egui` (`eframe` / `glow`) 独立桌面窗口启动、后台独立 Tokio worker 线程通信、无任何外部浏览器（Edge/Chrome）子进程、无任何本地 UI 端口监听。
+  - 首轮流式对话、工具调用与内联权限审批弹窗（`Tool approval`：Allow once / Allow this turn / Reject & stop）、流式生成与工具执行中途点击 `Stop` 取消中断、历史会话全文搜索与重新打开、单轮文件修改快照回滚（`Undo last turn edits`）。
+  - 保留 `--tui` 终端界面、`--no-tui` 纯文本 REPL、`-p` 单次非交互执行及可选的本地 Magpie 自动发现。
+- **macOS（代码已适配，待在 Mac 实机验收）**：
+  - 已配置 macOS 原生 `reqwest` (`native-tls` / `Security.framework`)、`eframe` (`glow`) 原生窗口、`rfd` 原生文件夹选择对话框、`/System/Library/Fonts/PingFang.ttc` 中文字体加载与 macOS 系统目录过滤；
+  - 因当前开发与测试环境为 Windows，macOS 原生编译（`aarch64-apple-darwin` / `x86_64-apple-darwin`）、Cocoa/OpenGL 窗口渲染、`rfd` 目录选择对话框以及 Mac 实机上的首次模型对话尚未在物理 Mac 上实测。
 
 开发验证可以从 `cargo test --locked` 开始。Rust 的包元数据声明了 MIT 许可证。
