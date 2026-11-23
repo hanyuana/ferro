@@ -1,202 +1,178 @@
-# Ferro
+<p align="center">
+  <img src="assets/ferro-logo.svg" width="84" height="84" alt="Ferro Logo" />
+</p>
 
-Ferro 是用 Rust 编写的轻量 AI 编码助手。它提供桌面对话窗口、终端界面和单次命令行模式，可以围绕一个本地项目读取代码、修改文件、运行测试和查看改动。
+<h1 align="center">Ferro</h1>
 
-Ferro 本身无需注册或登录。生成回答需要一个可用的模型，可以连接本机 Ollama、自己的模型 API，或者使用已配置的 Magpie 网关。
+<p align="center">
+  轻量、极简、纯原生 Rust 编写的本地 AI 编码桌面客户端（同步提供 TUI 与 CLI）<br/>
+  <strong>无需登录 · 不依赖浏览器 · 不监听本地网页端口 · 全简体中文原生界面</strong>
+</p>
 
-## 功能
+---
 
-- **围绕项目对话**：选择本地工作目录，打开历史会话，用 `@文件` 将工作区文件加入上下文。
-- **读写与验证**：搜索代码、修改文件、运行项目命令，查看工具步骤及修改预览。
-- **计划与执行**：用只读规划模式先梳理方案，再切换到执行模式修改代码。
-- **桌面交互**：可收起侧栏、独立滚动的历史列表、底部输入框、深浅色主题、流式 Markdown 和代码块复制。
-- **审阅与回滚**：在改动卡片中检查文件差异。撤销依赖当前运行中的文件快照，重要改动请同时用 Git 审阅和管理。
-- **本地记录**：保存对话历史，支持项目记忆和技能说明。使用远程模型时，模型所需的提示词和代码上下文会发往配置的服务端。
+## 核心特性
+
+- **极简无边框原生窗口**：基于 Rust + `egui` (`eframe` / `glow`) 构建，启动即开独立原生窗口，无 Electron/WebView 浏览器子进程，无 `localhost` 网页服务；一体化顶栏支持拖拽移动、双击最大化与四边自由缩放。
+- **专注的对话布局**：空会话将标题与输入卡片居中组合在主区中部；开始对话后输入框自动固定到底部并与 `760px` 对话流对齐。支持深浅双主题、窄窗口自动收起侧栏、Markdown 排版、代码块横向滚动与一键复制，工具步骤与 Diff 默认收起。
+- **四档精细权限模式**：输入框左下角可随时切换操作审批策略：
+  - **请求批准**：编辑文件和执行命令时始终询问
+  - **帮我批准**（默认）：常规工作区读写放行，修改外部文件或高危命令先询问确认
+  - **完全访问权限**：直接修改文件并执行命令，无需反复确认
+  - **只读规划**：仅分析代码与制定方案，禁止修改文件
+- **顺手的中文输入体验**：Windows 优先加载微软雅黑，macOS 优先加载苹方；支持**回车发送、`Shift + 回车` 换行**，内置中文输入法（IME）候选上屏防误发保护。
+- **自由连接任意模型**：无需 Ferro 账号，不强制依赖 Magpie。内置 **Ollama（本地）** 一键自动发现本机已安装模型，内置 **OpenAI / DeepSeek / Anthropic** 快捷预设与一键拉取接口模型列表，同时也兼容自动导入本机已有 Magpie / OpenCode 配置。
+- **多形态复用**：同一份 Rust 核心引擎同时支持原生桌面窗口、终端界面（`--tui`）、纯文本对话（`--no-tui`）和单次非交互命令（`-p`）；支持跨会话全文检索、单轮文件修改快照撤销与 `@路径` 引用文件。
+
+---
 
 ## 下载与安装（Windows x64）
 
-当前已构建并实机验证的预编译安装包仅面向 **Windows x64**（macOS 暂不提供未实机验证的预编译安装包，请参考下方“从源码开始（macOS）”在 Mac 本机编译）。
+当前提供实机验证过的 **Windows x64** 预编译安装包（macOS 暂不提供预编译安装包，请在 Mac 本机按下方步骤从源码编译）。
 
-1. **下载安装包与校验文件**：
-   前往 [GitHub Releases (hanyuana/ferro)](https://github.com/hanyuana/ferro/releases/tag/v0.2.0) 下载：
-   - `Ferro-Setup-0.2.0-x64.exe`（Windows x64 独立图形安装程序，内含原生 `ferro.exe`、多尺寸图标与卸载器）
-   - `Ferro-Setup-0.2.0-x64.exe.sha256`（SHA-256 校验值文件）
+1. **下载安装包与校验文件**
+   前往 [GitHub Releases](https://github.com/hanyuana/ferro/releases) 下载对应版本的：
+   - `Ferro-Setup-<version>-x64.exe`（图形安装程序，内含原生 `ferro.exe`、多尺寸图标与卸载器）
+   - `Ferro-Setup-<version>-x64.exe.sha256`（SHA-256 校验文件）
 
-2. **核对 SHA-256 校验值**：
-   在 PowerShell 中运行以下命令，确认输出的 Hash 与 `.sha256` 文件完全一致：
+2. **校验文件完整性**
    ```powershell
    Get-FileHash .\Ferro-Setup-0.2.0-x64.exe -Algorithm SHA256
    Get-Content .\Ferro-Setup-0.2.0-x64.exe.sha256
    ```
 
-3. **双击安装、自定义目录与卸载**：
-   - 双击 `Ferro-Setup-0.2.0-x64.exe` 打开原生安装向导。
-   - **默认按当前用户安装**到 `%LOCALAPPDATA%\Programs\Ferro`（无需管理员权限），也可点击 **`浏览…`** 自由选择任意安装目录。
-   - 安装完成后程序名为 `ferro.exe`，默认创建开始菜单快捷方式 `Ferro` 与 `Uninstall Ferro`。
-   - **升级与卸载说明**：重新运行安装器覆盖升级，或通过开始菜单 / 安装目录下的 `uninstall.exe` 卸载程序时，仅移除程序文件与快捷方式，**会完整保留 `%APPDATA%\ferro` 下的历史会话（`sessions/`）与配置文件（`config.toml`）**。
+3. **安装、升级与卸载**
+   - 双击安装包打开中文安装向导，默认按**当前用户**安装到 `%LOCALAPPDATA%\Programs\Ferro`（无需管理员权限），也可点击「浏览…」自定义目录。
+   - 安装后自动创建开始菜单快捷方式 `Ferro` 与 `卸载 Ferro`。
+   - **数据安全**：覆盖升级或执行卸载仅替换/移除程序文件与快捷方式，**会完整保留 `%APPDATA%\ferro` 下的历史会话（`sessions/`）与全局配置（`config.toml`）**。
 
-4. **代码签名状态说明**：
-   - 当前发布的 `Ferro-Setup-0.2.0-x64.exe` 与 `ferro.exe` **未附加商业 Authenticode 代码签名证书（Unsigned）**。
-   - **请勿关闭 Windows Defender、SmartScreen 或任何系统安全防护**；建议在运行前通过上方 `Get-FileHash` 核对 GitHub Release 公布的 SHA-256 校验值，或直接从本仓库源码自行编译。
+4. **代码签名说明**
+   - 当前发布的 Windows 安装包与可执行文件**未附加商业 Authenticode 代码签名证书（Unsigned）**。
+   - **请勿关闭 Windows Defender、SmartScreen 或任何系统安全防护**；建议运行前核对官方发布的 SHA-256 校验值，或直接从本仓库源码自行编译。
 
-5. **无需 Magpie 的首次配置步骤（打开即用）**：
-   - 安装后从开始菜单或安装目录启动 `ferro.exe`（无需浏览器、无需注册账号、无需安装 Magpie）。
-   - 点击窗口顶部栏的 **`Model setup`**：
-     - **连接本机 Ollama**：点击弹窗内的 `Ollama` 快捷按钮，在 `ollama/` 后填入本机已有的模型名（如 `ollama/qwen2.5-coder:7b`），Base URL 保持 `http://localhost:11434/v1`，API Key 留空，勾选 `Save to global config` 后点击 `Apply`。
-     - **连接自有 OpenAI / Anthropic / DeepSeek 兼容 API**：在 `Provider/model` 填入 `deepseek/deepseek-chat`（或自定义 `myproxy/model-name`），填入服务商的 `Base URL`（如 `https://api.deepseek.com/v1`）与 `API Key`（或 `env:DEEPSEEK_API_KEY`），勾选 `Save to global config` 后点击 `Apply`。
+---
 
-## 从源码开始（Windows）
+## 快速连接模型（无需 Magpie）
 
-准备 Git 和 Rust 工具链。使用 Rust 的 Windows MSVC 工具链时，还需要 Visual Studio C++ Build Tools（GNU 工具链可直接纯 Rust 编译）。Ferro 默认启动基于 `egui` (`eframe` / `glow`) 的纯原生独立桌面窗口，不启动任何外部浏览器（Edge/Chrome）子进程，也不监听本地网页端口。
+双击启动 `ferro.exe` 后，点击右上角 **`设置 → 模型设置`**（或底部模型下拉菜单中的 **`模型设置…`**）：
+
+### 方案 A：使用本机 Ollama（免费离线）
+1. 确保本机已安装并运行 [Ollama](https://ollama.com/)，且至少拉取过一个模型（例如 `ollama pull qwen2.5-coder:7b`）。
+2. 在「模型设置」中点击 **`Ollama（本地）`** 快捷按钮。
+3. Ferro 会自动请求本机 `http://localhost:11434/api/tags`，列出你已安装的模型供下拉直接点选（无需 API Key）。
+4. 勾选「保存到全局配置」，点击 **`应用`** 即可开始对话。
+
+### 方案 B：使用第三方 API 密钥（OpenAI / DeepSeek / Anthropic / 自定义网关）
+1. 在「模型设置」中点击 **`OpenAI`**、**`DeepSeek`** 或 **`Anthropic`** 快捷预设（自定义服务商可按 `提供方/模型名` 格式填写，如 `myproxy/model-name`）。
+2. 确认「接口地址」（OpenAI 兼容服务通常以 `/v1` 结尾）。
+3. 在「接口密钥」中粘贴 `sk-...`，或填写环境变量引用（如 `env:DEEPSEEK_API_KEY`）。
+4. 可点击 **`获取接口模型列表`** 自动拉取该接口支持的模型下拉选择。
+5. 勾选「保存到全局配置」，点击 **`应用`**。
+
+也可以手动编辑配置文件（全局路径：Windows `%APPDATA%\ferro\config.toml` / macOS `~/Library/Application Support/ferro/config.toml`；项目级覆盖：`<项目根目录>\.ferro\config.toml`）：
+
+```toml
+model = "deepseek/deepseek-chat"
+
+[provider.deepseek]
+type = "openai"
+base_url = "https://api.deepseek.com/v1"
+api_key = "env:DEEPSEEK_API_KEY"
+```
+
+### 方案 C：已有本地 Magpie 网关
+若本机已安装并配置了 Magpie，Ferro 启动时会自动读取本地代理地址与模型列表，底部下拉框直接切换即可。
+> 说明：Ferro 内核为 100% 独立纯 Rust 实现；若自动复用了 `~/.config/opencode/opencode.json` 中的 Magpie 调用密钥，Magpie 面板会按该密钥归属显示为 `opencode`。如需单独统计，可在 Magpie 中新建名为 `ferro` 的 Caller Key 并填入 Ferro 的「模型设置」。
+
+---
+
+## 常用快捷键与交互
+
+| 操作 | 快捷键 / 方式 |
+| --- | --- |
+| 发送消息 | `Enter`（输入法候选上屏时自动防误发） |
+| 输入框换行 | `Shift + Enter` |
+| 展开 / 收起左侧会话栏 | `Ctrl + B`（窄窗口 `<= 860px` 自动收起） |
+| 引用工作区文件 | 输入 `@文件路径` |
+| 撤销本轮修改 | 点击左下角模式菜单 → `撤销本轮修改` |
+| 切换代码项目 | 点击右上角 `项目` → `打开项目…` 或选择最近项目 |
+
+---
+
+## 命令行与终端模式（CLI / TUI）
+
+```powershell
+# 启动原生桌面窗口并指定项目目录
+.\ferro.exe -C "D:\dev\my-project"
+
+# 使用终端 TUI 界面
+.\ferro.exe --tui
+
+# 纯文本终端交互（适合 SSH / 无图形环境）
+.\ferro.exe --no-tui
+
+# 单次只读分析（不修改文件）
+.\ferro.exe -C "D:\dev\my-project" --plan -p "梳理项目目录结构与测试入口"
+
+# 指定模型并恢复当前项目最近一次会话
+.\ferro.exe -C "D:\dev\my-project" -m "ollama/qwen2.5-coder:7b" --continue
+
+# 在当前目录生成 .ferro/config.toml 模板
+.\ferro.exe init --local
+```
+
+---
+
+## 从源码构建
+
+### Windows
+需要 Git、Rust 工具链（MSVC 需安装 Visual Studio C++ Build Tools）：
 
 ```powershell
 git clone https://github.com/hanyuana/ferro.git
 Set-Location ferro
-cargo build --release --locked
 cargo test --locked
+cargo build --release --locked --bin ferro
 Copy-Item -Force .\target\release\ferro.exe .\ferro.exe
 .\ferro.exe
 ```
 
-编译产物位于 `target\release\ferro.exe`（在仓库根目录同步交付为 `ferro.exe`）。首次双击或命令行运行 `.\ferro.exe` 打开后，可通过左侧栏 `Open project…` 选择要工作的目录，也可以在启动时直接指定目录：
+如需同步构建 Windows x64 图形安装程序（将 `ferro.exe` 打包进单个安装器）：
 
 ```powershell
-.\ferro.exe -C 'D:\dev\my-project'
+cargo build --release --locked --features installer --bin ferro-setup
 ```
 
-## 从源码开始（macOS）
-
-需要 Git、Rust 稳定版工具链和 Apple Command Line Tools（未安装时运行 `xcode-select --install`）。在要运行 Ferro 的 Mac 上原生编译：Apple Silicon 使用 `aarch64-apple-darwin` 工具链，Intel 使用 `x86_64-apple-darwin`。
+### macOS
+需要 Git、Rust 稳定版工具链和 Apple Command Line Tools（`xcode-select --install`）：
 
 ```sh
 git clone https://github.com/hanyuana/ferro.git
 cd ferro
-cargo build --release --locked
 cargo test --locked
+cargo build --release --locked --bin ferro
+./target/release/ferro -C "$HOME/path/to/project"
 ```
 
-编译产物是 `target/release/ferro`。下面的首次对话路径无需 Ferro 登录或 Magpie，也不会下载模型。
-
-### 使用已有 Ollama 模型开始对话
-
-确认本机 Ollama 服务已经运行；用 `ollama list` 找到**已安装**模型的完整名称（包括标签），替换下面的 `YOUR_INSTALLED_MODEL`。如果列表为空，需自行准备模型或使用下一节已有 API。
-
-```sh
-ollama list
-./target/release/ferro -C "$HOME/path/to/project" --model 'ollama/YOUR_INSTALLED_MODEL'
-```
-
-`-C` 指向已存在的项目目录。默认连接 `http://localhost:11434/v1`，无需 Key。Ferro 直接打开独立原生 `egui` 桌面窗口（无本地 HTTP/SSE 端口，也不调用浏览器）。
-
-点击左侧栏的 `Open project…` 按钮，会通过 `rfd` 打开系统原生文件夹选择对话框；选择目录后将在后台 worker 中切换工作区并重新加载该目录的配置与会话历史；取消则保留当前目录。也可点击顶部 `Model setup` 在窗口内直接调整 `provider/model`、Base URL 与 API Key。
-
-在底部输入框发送“只回复 hello，不调用工具”（点击 `Send` 或按 `Ctrl/Cmd+Enter`）以确认首次对话连通。模型支持工具调用时，再试只读项目分析。也可在终端直接检查同一个模型：
-
-```sh
-./target/release/ferro -C "$HOME/path/to/project" --model 'ollama/YOUR_INSTALLED_MODEL' --plan -p 'Reply hello without using tools.'
-```
-
-### 使用已有兼容 API 开始对话
-
-在目标项目的 `.ferro/config.toml` 中使用下方“方案 B”的配置，把 Base URL 和模型 ID 替换为服务商实际值。然后在同一终端设置 Key 并启动（`myproxy/my-coding-model` 对应该配置）：
-
-```sh
-export FERRO_PROVIDER_KEY='YOUR_EXISTING_API_KEY'
-./target/release/ferro -C "$HOME/path/to/project" --model 'myproxy/my-coding-model'
-```
-
-发送同样的 hello 消息。Ferro 不需要账号；API 服务商可能需要自己的账号和有效密钥。macOS 全局配置路径为 `~/Library/Application Support/ferro/config.toml`，项目配置为 `<project>/.ferro/config.toml`，后者覆盖前者；`--model` 优先于配置。`--tui` 和 `--no-tui` 仍可用于终端会话。
-
-## 连接模型
-
-### 方案 A：用 Ollama 在本机运行模型
-
-1. 安装并启动 Ollama。运行 `ollama list`，确认本机已经有可用模型。如果列表为空，先用 `ollama pull <模型名>` 拉取一个。
-2. 在 Ferro 中打开模型设置，将模型填为 `ollama/<实际模型名>`。也可以用命令行显式指定。模型名应与 `ollama list` 的结果一致。
-3. 本机默认服务地址是 `http://localhost:11434/v1`。默认本地连接无需 API Key。
-
-```powershell
-ollama list
-.\target\release\ferro.exe --model 'ollama/你的模型名'
-```
-
-能生成文本只说明对话连通。要让 Ferro 自动读写文件和跑测试，还需选支持工具调用的模型。
-
-### 方案 B：使用兼容的模型 API
-
-使用你持有的 API Key、服务商提供的 Base URL 和实际模型 ID。下面是项目级配置示例。先在**要使用的项目根目录**创建 `.ferro/config.toml`，再启动 Ferro。示例地址和模型名需要替换。
-
-```toml
-model = "myproxy/my-coding-model"
-
-[provider.myproxy]
-type = "openai"
-base_url = "https://example.com/v1"
-api_key = "env:FERRO_PROVIDER_KEY"
-```
-
-在启动 Ferro 的终端中设置 `FERRO_PROVIDER_KEY`。建议通过环境变量注入密钥，避免把明文 Key 写入仓库。OpenAI 兼容地址通常填到 `/v1`，Ferro 会追加 `/chat/completions`。
-
-内置服务商包括 OpenAI、Anthropic、DeepSeek、Qwen、Moonshot、智谱、OpenRouter 和 Ollama。服务端模型名称和账号权限以你实际可用的配置为准。
-
-### 方案 C：沿用现有 Magpie
-
-本机已通过 OpenCode 配置了 Magpie 时，Ferro 可尝试读取已有配置并导入模型。在模型列表中选择能正常使用的 `magpie/…` 模型即可。没有 Magpie 的机器可以直接使用上面的 Ollama 或 API 方案。
-
-## 使用方式
-
-```powershell
-# 打开终端界面
-.\target\release\ferro.exe --tui
-
-# 纯文本终端会话
-.\target\release\ferro.exe --no-tui
-
-# 在指定项目执行一次只读分析
-.\target\release\ferro.exe -C 'D:\dev\my-project' --plan -p '梳理项目结构和测试入口'
-
-# 恢复当前工作目录最近的会话
-.\target\release\ferro.exe -C 'D:\dev\my-project' --continue
-
-# 在当前项目生成一份配置示例
-.\target\release\ferro.exe init --local
-```
-
-建议首次尝试先让 Ferro 解释项目结构。确认工作目录和权限后，再给一个有明确预期的小任务，例如：
-
-> 检查标签解析函数。去掉空标签，按 Unicode 大小写折叠去重，同时保留第一次出现的拼写和顺序。只修改对应源码，运行相关测试并列出结果。
-
-Ferro 会先读全局配置，再应用项目的 `.ferro/config.toml`。命令行的 `--model` 可覆盖配置中的模型。生成的配置示例允许文件编辑和多数命令。想逐项确认时，可在项目配置里设置：
-
-```toml
-[permission]
-edit = "ask"
-
-[permission.bash]
-"*" = "ask"
-```
-
-权限规则用于决定允许、询问或拒绝工具调用，不能代替操作系统沙箱。单次命令行模式遇到需要确认的工具默认会拒绝，`--yes` 会统一批准这些请求，仅在可信的测试目录使用。
+---
 
 ## 常见问题
 
-| 现象 | 检查方式 |
+| 现象 | 排查方式 |
 | --- | --- |
-| 窗口打开了，但发不出消息 | 点击顶部 `Model setup` 检查所选模型、API Key 和服务地址。只有客户端时可以打开界面，生成回答仍需要模型。 |
-| Ollama 连接被拒绝 | 确认 Ollama 在运行，并检查本机端口和实际模型名。 |
-| API 返回 401、404 或模型不存在 | 分别检查密钥、Base URL、模型 ID 和服务账号权限。 |
-| 能聊天，但不会修改文件 | 检查模型是否支持工具调用、底部 `PLAN (read only)` 是否被勾选，以及工具权限配置。 |
-| 桌面窗口中文显示异常 | Ferro 默认自动加载系统字体（Windows `msyh.ttc`/`simhei.ttf`，macOS `PingFang.ttc`）；也可通过环境变量 `FERRO_CJK_FONT` 指定自定义 TTF/TTC 字体路径。 |
-| 无图形环境或远程 SSH 会话 | 原生桌面窗口需要本地图形桌面会话与 OpenGL (`glow`) 支持；在无头或 SSH 环境下请使用 `--tui`、`--no-tui` 或 `-p` 命令行模式。 |
+| 打开后发消息提示认证失败 | 点击 `设置 → 模型设置` 检查所选模型、接口地址与 API Key；新电脑未配置任何模型密钥时仅展示界面，需配置本机 Ollama 或云端 API 后对话。 |
+| 提示上下文已达到模型上限 | 每个会话上下文容量取决于当前所选模型（客户端不会因超限崩溃）；请新建会话或切换到更大上下文窗口的模型继续。 |
+| 无法连接本机 Ollama | 确认 Ollama 服务已启动，且在终端运行 `ollama list` 能看到已安装模型。 |
+| 只能分析不能修改文件 | 检查左下角权限模式是否处于 `只读规划`，切换为 `帮我批准` 或 `完全访问权限` 即可修改文件。 |
+| 自定义中文字体 | 默认自动加载系统字体（Windows `msyh.ttc` / macOS `PingFang.ttc`）；也可通过环境变量 `FERRO_CJK_FONT` 指定自定义 TTF/TTC 字体路径。 |
 
-## 当前验证范围
+---
 
-- **Windows（已在实机验证）**：
-  - 纯原生 `egui` (`eframe` / `glow`) 独立桌面窗口启动、后台独立 Tokio worker 线程通信、无任何外部浏览器（Edge/Chrome）子进程、无任何本地 UI 端口监听。
-  - 首轮流式对话、工具调用与内联权限审批弹窗（`Tool approval`：Allow once / Allow this turn / Reject & stop）、流式生成与工具执行中途点击 `Stop` 取消中断、历史会话全文搜索与重新打开、单轮文件修改快照回滚（`Undo last turn edits`）。
-  - 保留 `--tui` 终端界面、`--no-tui` 纯文本 REPL、`-p` 单次非交互执行及可选的本地 Magpie 自动发现。
-- **macOS（代码已适配，待在 Mac 实机验收）**：
-  - 已配置 macOS 原生 `reqwest` (`native-tls` / `Security.framework`)、`eframe` (`glow`) 原生窗口、`rfd` 原生文件夹选择对话框、`/System/Library/Fonts/PingFang.ttc` 中文字体加载与 macOS 系统目录过滤；
-  - 因当前开发与测试环境为 Windows，macOS 原生编译（`aarch64-apple-darwin` / `x86_64-apple-darwin`）、Cocoa/OpenGL 窗口渲染、`rfd` 目录选择对话框以及 Mac 实机上的首次模型对话尚未在物理 Mac 上实测。
+## 平台验证范围
 
-开发验证可以从 `cargo test --locked` 开始。Rust 的包元数据声明了 MIT 许可证。
+- **Windows x64（已实机验证）**：无边框纯原生 `egui` (`glow`) 窗口、多尺寸图标与独立图形安装器、目录选择器、回车/`Shift+回车` 与中文 IME 防误发、Ollama/云端模型切换、四档权限审批、流式停止、历史检索与回滚，全部 18 项单元测试通过。
+- **macOS（代码已适配，待在物理 Mac 实机验收）**：已适配 `native-tls`、`eframe` (`glow`)、`rfd` 原生目录框与 `PingFang.ttc` 字体，尚未在物理 Mac 上执行打包与 GUI 实测。
+
+## 许可证
+
+本项目基于 [MIT License](Cargo.toml) 开源。
