@@ -38,6 +38,7 @@ pub struct Permissions {
     edit: Action,
     rules: Vec<Rule>,
     session_edit_allow: bool,
+    full_access: bool,
 }
 
 fn severity(a: Action) -> u8 {
@@ -51,10 +52,24 @@ fn severity(a: Action) -> u8 {
 impl Permissions {
     pub fn new(cfg: &PermissionConfig) -> Self {
         let rules = cfg.bash.iter().filter_map(|(p, a)| Rule::new(p, *a)).collect();
-        Self { edit: cfg.edit, rules, session_edit_allow: false }
+        Self { edit: cfg.edit, rules, session_edit_allow: false, full_access: false }
+    }
+
+    /// 请求批准模式：修改文件与执行命令时始终询问
+    pub fn ask_all() -> Self {
+        let rules = Rule::new("*", Action::Ask).into_iter().collect();
+        Self { edit: Action::Ask, rules, session_edit_allow: false, full_access: false }
+    }
+
+    /// 完全访问模式：直接放行文件编辑与命令执行，不弹窗打断
+    pub fn allow_all() -> Self {
+        Self { edit: Action::Allow, rules: Vec::new(), session_edit_allow: true, full_access: true }
     }
 
     pub fn check(&self, kind: ToolKind, inv: &Invocation, plan_mode: bool, cwd: &Path) -> Action {
+        if self.full_access && !plan_mode {
+            return Action::Allow;
+        }
         match kind {
             ToolKind::Read | ToolKind::Meta => Action::Allow,
             ToolKind::Edit => {

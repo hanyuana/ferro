@@ -13,7 +13,7 @@ const ICON_64_RGBA: &[u8] = include_bytes!("../../assets/icon_64_rgba.bin");
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "ferro-setup", version, about = "Ferro Windows x64 Installer & Uninstaller")]
+#[command(name = "ferro-setup", version, about = "Ferro Windows x64 安装与卸载程序")]
 struct SetupCli {
     /// 自定义安装目录（默认：%LOCALAPPDATA%\Programs\Ferro）
     #[arg(long)]
@@ -115,12 +115,11 @@ fn app_icon() -> egui::IconData {
 
 fn install_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    for p in ["C:/Windows/Fonts/simhei.ttf", "C:/Windows/Fonts/msyh.ttc"] {
+    for p in ["C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/msyh.ttf", "C:/Windows/Fonts/simhei.ttf"] {
         if let Ok(bytes) = std::fs::read(p) {
             fonts.font_data.insert("cjk".into(), egui::FontData::from_owned(bytes));
-            for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-                fonts.families.entry(family).or_default().push("cjk".into());
-            }
+            fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "cjk".into());
+            fonts.families.entry(egui::FontFamily::Monospace).or_default().push("cjk".into());
             break;
         }
     }
@@ -137,11 +136,26 @@ struct InstallerApp {
     status: String,
     done: bool,
     logo_tex: Option<egui::TextureHandle>,
+    folder_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
+    error_details: Option<String>,
 }
 
 impl eframe::App for InstallerApp {
-    fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-        ctx.set_visuals(egui::Visuals::dark());
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(rx) = &self.folder_rx {
+            match rx.try_recv() {
+                Ok(chosen) => {
+                    if let Some(path) = chosen {
+                        self.install_dir = path.display().to_string();
+                    }
+                    self.folder_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.folder_rx = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                }
+            }
+        }
         if self.logo_tex.is_none() {
             let img = egui::ColorImage::from_rgba_unmultiplied([64, 64], ICON_64_RGBA);
             self.logo_tex = Some(ctx.load_texture("ferro_logo", img, egui::TextureOptions::LINEAR));
@@ -168,13 +182,24 @@ impl eframe::App for InstallerApp {
             ui.label("安装目录（默认按当前用户安装，无需管理员权限）：");
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut self.install_dir).desired_width(410.0));
-                if ui.button("浏览…").clicked() {
+                if ui.add_enabled(self.folder_rx.is_none(), egui::Button::new("浏览…")).clicked() {
                     let initial = PathBuf::from(&self.install_dir);
-                    let mut dlg = rfd::FileDialog::new();
-                    if initial.exists() {
-                        dlg = dlg.set_directory(&initial);
+                    let mut dialog = rfd::FileDialog::new().set_title("选择安装目录");
+                    if initial.is_dir() {
+                        dialog = dialog.set_directory(&initial);
                     }
-                    if let Some(chosen) = dlg.pick_folder() {
+                    #[cfg(windows)]
+                    {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        self.folder_rx = Some(rx);
+                        let repaint = ctx.clone();
+                        std::thread::spawn(move || {
+                            let _ = tx.send(dialog.pick_folder());
+                            repaint.request_repaint();
+                        });
+                    }
+                    #[cfg(not(windows))]
+                    if let Some(chosen) = dialog.set_parent(_frame).pick_folder() {
                         self.install_dir = chosen.display().to_string();
                     }
                 }
@@ -190,7 +215,8 @@ impl eframe::App for InstallerApp {
             ui.add_space(16.0);
             ui.horizontal(|ui| {
                 let install_label = if self.uninstall_mode { "重新安装 / 修复" } else { "立即安装 / 升级" };
-                if ui.button(egui::RichText::new(install_label).strong()).clicked() {
+                if ui.add_enabled(self.folder_rx.is_none(), egui::Button::new(egui::RichText::new(install_label).strong())).clicked() {
+                    self.error_details = None;
                     let target = PathBuf::from(self.install_dir.trim());
                     match perform_install(&target, &self.start_menu_dir, self.create_shortcut, self.register_hkcu) {
                         Ok(_) => {
@@ -202,12 +228,15 @@ impl eframe::App for InstallerApp {
                             }
                         }
                         Err(e) => {
-                            self.status = format!("安装失败：{:#}", e);
+                            self.done = false;
+                            self.status = "安装失败。请检查目录是否可写，以及 Ferro 是否仍在运行。".into();
+                            self.error_details = Some(format!("{e:#}"));
                         }
                     }
                 }
 
-                if ui.button("卸载已安装版本").clicked() {
+                if ui.add_enabled(self.folder_rx.is_none(), egui::Button::new("卸载已安装版本")).clicked() {
+                    self.error_details = None;
                     let target = PathBuf::from(self.install_dir.trim());
                     match perform_uninstall(&target, &self.start_menu_dir, self.register_hkcu) {
                         Ok(_) => {
@@ -215,7 +244,9 @@ impl eframe::App for InstallerApp {
                             self.done = true;
                         }
                         Err(e) => {
-                            self.status = format!("卸载失败：{:#}", e);
+                            self.done = false;
+                            self.status = "卸载失败。请检查目录权限和程序运行状态。".into();
+                            self.error_details = Some(format!("{e:#}"));
                         }
                     }
                 }
@@ -233,6 +264,13 @@ impl eframe::App for InstallerApp {
                     egui::Color32::from_rgb(248, 113, 113)
                 };
                 ui.colored_label(color, &self.status);
+                if let Some(details) = &self.error_details {
+                    ui.collapsing("原始详情", |ui| {
+                        egui::ScrollArea::vertical().max_height(70.0).show(ui, |ui| {
+                            ui.add(egui::Label::new(details).wrap().selectable(true));
+                        });
+                    });
+                }
             }
         });
     }
@@ -248,17 +286,18 @@ fn run_installer_gui(
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
-            .with_title(format!("Ferro v{} Setup", APP_VERSION))
+            .with_title(format!("Ferro v{} 安装向导", APP_VERSION))
             .with_icon(Arc::new(app_icon()))
-            .with_inner_size([560.0, 360.0])
+            .with_inner_size([585.0, 400.0])
             .with_resizable(false),
         ..Default::default()
     };
     eframe::run_native(
-        "Ferro Setup",
+        "Ferro 安装向导",
         options,
         Box::new(move |cc| {
             install_fonts(&cc.egui_ctx);
+            cc.egui_ctx.set_visuals(egui::Visuals::dark());
             Ok(Box::new(InstallerApp {
                 install_dir: install_dir.display().to_string(),
                 start_menu_dir,
@@ -269,10 +308,12 @@ fn run_installer_gui(
                 status: String::new(),
                 done: false,
                 logo_tex: None,
+                folder_rx: None,
+                error_details: None,
             }))
         }),
     )
-    .map_err(|e| anyhow::anyhow!("Installer window failed: {e}"))
+    .map_err(|e| anyhow::anyhow!("安装窗口创建失败: {e}"))
 }
 
 fn perform_install(
@@ -315,7 +356,7 @@ fn perform_install(
         shortcut_path = Some(lnk);
 
         if target_uninst.exists() {
-            let ulnk = start_menu_dir.join("Uninstall Ferro.lnk");
+            let ulnk = start_menu_dir.join("卸载 Ferro.lnk");
             let args = format!("--uninstall --install-dir \"{}\"", install_dir.display());
             let _ = create_windows_shortcut(
                 &ulnk,
@@ -354,10 +395,11 @@ fn perform_uninstall(
     let target_ico = install_dir.join("ferro.ico");
     let target_uninst = install_dir.join("uninstall.exe");
     let lnk = start_menu_dir.join("Ferro.lnk");
-    let ulnk = start_menu_dir.join("Uninstall Ferro.lnk");
+    let ulnk = start_menu_dir.join("卸载 Ferro.lnk");
+    let old_ulnk = start_menu_dir.join("Uninstall Ferro.lnk");
 
     let mut removed = Vec::new();
-    for p in [&target_exe, &target_ico, &lnk, &ulnk] {
+    for p in [&target_exe, &target_ico, &lnk, &ulnk, &old_ulnk] {
         if p.exists() && std::fs::remove_file(p).is_ok() {
             removed.push(p.display().to_string());
         }
@@ -448,7 +490,7 @@ fn register_uninstall_entry(install_dir: &Path, icon_path: &Path, uninst_path: &
     for (name, kind, val) in [
         ("DisplayName", "REG_SZ", "Ferro"),
         ("DisplayVersion", "REG_SZ", APP_VERSION),
-        ("Publisher", "REG_SZ", "Ferro Contributors"),
+        ("Publisher", "REG_SZ", "Ferro 贡献者"),
         ("InstallLocation", "REG_SZ", &install_dir.display().to_string()),
         ("DisplayIcon", "REG_SZ", &icon_path.display().to_string()),
         ("UninstallString", "REG_SZ", &uninst_cmd),

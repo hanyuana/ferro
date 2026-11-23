@@ -5,18 +5,29 @@ use crate::session::FileTracker;
 use crate::tools::{Shell, ToolCtx};
 use std::sync::Mutex;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccessMode {
+    Ask,
+    Smart,
+    Full,
+    Plan,
+}
+
 pub enum Command {
-    Turn { id: u64, prompt: String, mode: Mode, cancel: Arc<Notify> },
+    Turn { id: u64, prompt: String, access: AccessMode, cancel: Arc<Notify> },
     Workspace(PathBuf),
     Reopen(String),
     DeleteSession(String),
     New,
     Undo,
+    SelectModel(String),
     Setup { model: String, url: String, key: String, anthropic: bool, persist: bool },
+    FetchModels { provider: String, url: String, key: String },
     Search(String),
 }
 pub struct Snapshot {
     pub cwd: PathBuf,
+    pub session_id: String,
     pub model: String,
     pub config: Arc<Config>,
     pub transcript: Option<Vec<super::Row>>,
@@ -31,18 +42,20 @@ pub enum Event {
     Done(u64),
     Notice(String),
     Sessions(Vec<history::SessionInfo>),
+    FetchedModels { models: Vec<String>, status: String },
 }
 
 fn snapshot(agent: &Agent, config: &Arc<Config>, reset_transcript: bool) -> Snapshot {
     Snapshot {
         cwd: agent.ctx.cwd.clone(),
+        session_id: agent.session_id.clone(),
         model: agent.model_ref.clone(),
         config: Arc::clone(config),
         transcript: reset_transcript.then(|| super::transcript(&agent.messages)),
         sessions: history::list_sessions(&agent.ctx.cwd),
         recent: crate::workspace::load_recent_projects(),
         todos: crate::session::render_todos(&agent.ctx.todos.lock().unwrap()),
-        usage: format!("Tokens  {} in / {} out", agent.usage.input, agent.usage.output),
+        usage: format!("词元：输入 {} / 输出 {}", agent.usage.input, agent.usage.output),
     }
 }
 
@@ -91,13 +104,22 @@ where
                     send(Event::Sessions(history::search_sessions(&agent.ctx.cwd, query)));
                     continue;
                 }
+                if let Command::FetchModels { provider, url, key } = command {
+                    let (models, status) = fetch_remote_models(&provider, &url, &key).await;
+                    send(Event::FetchedModels { models, status });
+                    continue;
+                }
                 let mut reset = matches!(&command, Command::Workspace(_) | Command::New | Command::Reopen(_));
                 let result: anyhow::Result<()> = async {
                     match command {
-                        Command::Turn { id, prompt, mode, cancel } => {
-                            agent.mode = mode;
+                        Command::Turn { id, prompt, access, cancel } => {
+                            agent.mode = if access == AccessMode::Plan { Mode::Plan } else { Mode::Build };
                             // Temporary grants belong to this turn, never the next one.
-                            agent.perms = Permissions::new(&config.permission);
+                            agent.perms = match access {
+                                AccessMode::Ask => Permissions::ask_all(),
+                                AccessMode::Smart | AccessMode::Plan => Permissions::new(&config.permission),
+                                AccessMode::Full => Permissions::allow_all(),
+                            };
                             let expanded = crate::tui::app::expand_at_mentions(&agent.ctx.cwd, &prompt);
                             let (tx, mut ev) = mpsc::unbounded_channel();
                             let turn = agent.run_turn(expanded, tx, cancel);
@@ -116,8 +138,8 @@ where
                         }
                         Command::Workspace(path) => switch(&mut agent, &mut config, path)?,
                         Command::Reopen(id) => {
-                            anyhow::ensure!(history::search_sessions(&agent.ctx.cwd, "").iter().any(|s| s.id == id), "Session is not in this workspace");
-                            let messages = history::load_session(&id).ok_or_else(|| anyhow::anyhow!("Unable to load session"))?;
+                            anyhow::ensure!(history::search_sessions(&agent.ctx.cwd, "").iter().any(|s| s.id == id), "该历史会话不属于当前工作区");
+                            let messages = history::load_session(&id).ok_or_else(|| anyhow::anyhow!("无法加载该历史会话"))?;
                             agent.clear();
                             agent.ctx.tracker.lock().unwrap().clear_backups();
                             agent.session_id = id;
@@ -136,12 +158,18 @@ where
                         }
                         Command::Undo => {
                             let paths = agent.ctx.tracker.lock().unwrap().undo_all();
-                            send(Event::Notice(format!("Restored {} files (current turn snapshots)", paths.len())));
+                            send(Event::Notice(format!("已撤销本轮 {} 个文件的修改", paths.len())));
+                        }
+                        Command::SelectModel(model) => {
+                            let (provider, name) = config.build_provider(&model)?;
+                            agent.provider = provider;
+                            agent.model = name;
+                            agent.model_ref = model;
                         }
                         Command::Setup { model, url, key, anthropic, persist } => {
-                            let (pid, name) = model.split_once('/').ok_or_else(|| anyhow::anyhow!("Use provider/model"))?;
-                            anyhow::ensure!(!pid.is_empty() && !name.is_empty(), "Provider and model are required");
-                            anyhow::ensure!(url.starts_with("https://") || url.starts_with("http://"), "Base URL must use http:// or https://");
+                            let (pid, name) = model.split_once('/').ok_or_else(|| anyhow::anyhow!("模型格式应为 服务商/模型名"))?;
+                            anyhow::ensure!(!pid.is_empty() && !name.is_empty(), "服务商和模型名称不能为空");
+                            anyhow::ensure!(url.starts_with("https://") || url.starts_with("http://"), "接口地址必须以 http:// 或 https:// 开头");
                             let mut next = (*config).clone();
                             let mut pc = next.provider.get(pid).cloned().unwrap_or(ProviderConfig {
                                 kind: ProviderKind::Openai, base_url: None, api_key: None,
@@ -159,6 +187,7 @@ where
                             agent.model_ref = model;
                             config = Arc::new(next);
                         }
+                        Command::FetchModels { .. } => return Ok(()),
                         Command::Search(query) => {
                             send(Event::Sessions(history::search_sessions(&agent.ctx.cwd, &query)));
                             return Ok(());
@@ -177,7 +206,7 @@ where
 fn switch(agent: &mut Agent, config: &mut Arc<Config>, path: PathBuf) -> anyhow::Result<()> {
     let path = std::fs::canonicalize(path)?;
     let path = crate::strip_unc(path);
-    anyhow::ensure!(path.is_dir() && !crate::workspace::is_system_dir(&path), "Choose a project directory");
+    anyhow::ensure!(path.is_dir() && !crate::workspace::is_system_dir(&path), "请选择有效的项目工作目录");
     let next = Config::load(&path)?;
     let model = next.resolve_model(None);
     let (provider, model_name) = next.build_provider(&model)?;
@@ -191,17 +220,103 @@ fn switch(agent: &mut Agent, config: &mut Arc<Config>, path: PathBuf) -> anyhow:
     Ok(())
 }
 
+async fn fetch_remote_models(provider: &str, url: &str, key: &str) -> (Vec<String>, String) {
+    let pid = provider.trim();
+    let pid = if pid.is_empty() { "custom" } else { pid };
+    let base = url.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return (Vec::new(), "请先填写接口地址".into());
+    }
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return (Vec::new(), format!("无法初始化网络请求：{e}")),
+    };
+
+    let is_ollama = pid.eq_ignore_ascii_case("ollama") || base.contains("11434");
+    if is_ollama {
+        let origin = base.strip_suffix("/v1").unwrap_or(base);
+        let tags_url = format!("{origin}/api/tags");
+        match client.get(&tags_url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(val) = resp.json::<serde_json::Value>().await {
+                    let mut models: Vec<String> = val
+                        .get("models")
+                        .and_then(|m| m.as_array())
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|item| item.get("name").and_then(|n| n.as_str()))
+                        .map(|name| format!("{pid}/{name}"))
+                        .collect();
+                    models.sort();
+                    models.dedup();
+                    if models.is_empty() {
+                        return (models, "已连接本机 Ollama，但尚未安装任何模型（可先运行 ollama pull）".into());
+                    }
+                    let msg = format!("已自动发现 {} 个本机 Ollama 模型，可直接下拉选择", models.len());
+                    return (models, msg);
+                }
+                return (Vec::new(), "无法解析 Ollama 返回的模型列表".into());
+            }
+            Ok(resp) => {
+                return (Vec::new(), format!("Ollama 接口返回状态码 {}，请确认服务正常", resp.status().as_u16()));
+            }
+            Err(_) => {
+                return (Vec::new(), "未检测到运行中的本机 Ollama，请先启动 Ollama 或手动输入模型名".into());
+            }
+        }
+    }
+
+    let resolved_key = if let Some(var) = key.trim().strip_prefix("env:") {
+        std::env::var(var.trim()).unwrap_or_default()
+    } else {
+        key.trim().to_string()
+    };
+    let models_url = format!("{base}/models");
+    let mut req = client.get(&models_url);
+    if !resolved_key.is_empty() {
+        req = req.bearer_auth(&resolved_key);
+    }
+    match req.send().await {
+        Ok(resp) if resp.status().is_success() => {
+            if let Ok(val) = resp.json::<serde_json::Value>().await {
+                let mut models: Vec<String> = val
+                    .get("data")
+                    .and_then(|d| d.as_array())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|item| item.get("id").and_then(|n| n.as_str()))
+                    .map(|id| format!("{pid}/{id}"))
+                    .collect();
+                models.sort();
+                models.dedup();
+                if models.is_empty() {
+                    return (models, "接口连接成功，但未返回可用模型列表，可手动填写模型名".into());
+                }
+                let msg = format!("已获取 {} 个可用模型，可直接下拉选择", models.len());
+                (models, msg)
+            } else {
+                (Vec::new(), "接口响应格式无法解析，请手动填写模型名".into())
+            }
+        }
+        Ok(resp) => (Vec::new(), format!("获取模型列表失败（状态码 {}），请检查接口地址与密钥", resp.status().as_u16())),
+        Err(_) => (Vec::new(), "无法连接到该接口，请检查接口地址与网络".into()),
+    }
+}
+
 fn persist_setup(model: &str, pc: &ProviderConfig) -> anyhow::Result<()> {
     let path = global_dir().join("config.toml");
     let mut doc: toml::Value = if path.exists() { toml::from_str(&std::fs::read_to_string(&path)?)? }
         else { toml::Value::Table(Default::default()) };
     doc["model"] = toml::Value::String(model.into());
-    let root = doc.as_table_mut().ok_or_else(|| anyhow::anyhow!("Invalid configuration"))?;
+    let root = doc.as_table_mut().ok_or_else(|| anyhow::anyhow!("配置文件格式无效"))?;
     let providers = root.entry("provider").or_insert(toml::Value::Table(Default::default()))
-        .as_table_mut().ok_or_else(|| anyhow::anyhow!("Invalid providers"))?;
+        .as_table_mut().ok_or_else(|| anyhow::anyhow!("服务商配置格式无效"))?;
     let pid = model.split_once('/').unwrap().0;
     let entry = providers.entry(pid).or_insert(toml::Value::Table(Default::default()))
-        .as_table_mut().ok_or_else(|| anyhow::anyhow!("Invalid provider"))?;
+        .as_table_mut().ok_or_else(|| anyhow::anyhow!("服务商条目格式无效"))?;
     entry.insert("type".into(), toml::Value::String(if matches!(pc.kind, ProviderKind::Anthropic) { "anthropic" } else { "openai" }.into()));
     entry.insert("base_url".into(), toml::Value::String(pc.base_url.clone().unwrap_or_default()));
     entry.insert("api_key".into(), toml::Value::String(pc.api_key.clone().unwrap_or_default()));
@@ -334,7 +449,7 @@ mod tests {
         tx.send(Command::Turn {
             id: 1,
             prompt: "Hello".into(),
-            mode: Mode::Build,
+            access: AccessMode::Smart,
             cancel: cancel1,
         })
         .unwrap();
@@ -355,7 +470,7 @@ mod tests {
         tx.send(Command::Turn {
             id: 2,
             prompt: "ASK_BASH".into(),
-            mode: Mode::Plan,
+            access: AccessMode::Plan,
             cancel: cancel2,
         })
         .unwrap();
@@ -385,7 +500,7 @@ mod tests {
         tx.send(Command::Turn {
             id: 3,
             prompt: "SLOW_TURN".into(),
-            mode: Mode::Build,
+            access: AccessMode::Smart,
             cancel: cancel3.clone(),
         })
         .unwrap();

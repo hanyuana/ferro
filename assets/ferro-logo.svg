@@ -1,15 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#131B2E"/>
-      <stop offset="100%" stop-color="#0B101D"/>
+    <linearGradient id="topBlade" x1="12%" y1="10%" x2="88%" y2="85%">
+      <stop offset="0%" stop-color="#34D399"/>
+      <stop offset="55%" stop-color="#178563"/>
+      <stop offset="100%" stop-color="#0E6249"/>
     </linearGradient>
-    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#5EEAD4"/>
-      <stop offset="100%" stop-color="#3B82F6"/>
+    <linearGradient id="lowBlade" x1="15%" y1="20%" x2="90%" y2="90%">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#0D5C45"/>
     </linearGradient>
   </defs>
-  <rect x="12" y="12" width="232" height="232" rx="54" fill="url(#bg)" stroke="#2A364F" stroke-width="6"/>
-  <path d="M68 62 H188 L172 92 H102 V116 H160 L146 144 H102 V196 H68 Z" fill="url(#beam)"/>
-  <path d="M148 156 L176 174 L148 192" fill="none" stroke="#5EEAD4" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 透明底极简几何符号：两道柔和圆润的翡翠绿折翼，暗含 Ferro 锋芒与 F 负空间 -->
+  <!-- 主折翼（上横 + 左弧柱） -->
+  <path d="M 118 228
+           C 118 144, 178 96, 266 96
+           L 382 96
+           C 406 96, 418 124, 400 142
+           L 354 188
+           C 344 198, 330 204, 316 204
+           L 254 204
+           C 216 204, 198 222, 198 260
+           L 198 378
+           C 198 402, 170 416, 150 400
+           L 128 380
+           C 121 373, 118 363, 118 352
+           Z"
+        fill="url(#topBlade)"/>
+  <!-- 次折翼（中短锋芒，留出优雅呼吸负空间） -->
+  <path d="M 244 264
+           L 352 264
+           C 374 264, 386 290, 370 306
+           L 332 344
+           C 323 353, 310 358, 297 358
+           L 244 358
+           C 228 358, 218 346, 218 330
+           L 218 290
+           C 218 275, 229 264, 244 264
+           Z"
+        fill="url(#lowBlade)"/>
 </svg>

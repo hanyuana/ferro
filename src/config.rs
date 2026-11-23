@@ -241,9 +241,7 @@ impl Config {
         }
         #[cfg(windows)]
         {
-            let mut candidates = vec![
-                PathBuf::from(r"E:\Downloads\magpie-windows-amd64.exe"),
-            ];
+            let mut candidates: Vec<PathBuf> = Vec::new();
             if let Some(home) = dirs::home_dir() {
                 candidates.push(home.join("Downloads").join("magpie-windows-amd64.exe"));
                 candidates.push(home.join("AppData").join("Local").join("magpie").join("magpie.exe"));

@@ -143,7 +143,7 @@ impl Agent {
             self.messages.push(resp.message);
             if calls.is_empty() {
                 if resp.stop == StopReason::MaxTokens {
-                    let _ = tx.send(AgentEvent::Notice("输出达到 max_tokens 上限被截断".into()));
+                    let _ = tx.send(AgentEvent::Notice("输出达到长度上限，后续内容已截断".into()));
                 }
                 self.save_history();
                 return Ok(());
