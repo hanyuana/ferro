@@ -23,6 +23,10 @@ pub enum Block {
     Text {
         text: String,
     },
+    Image {
+        media_type: String,
+        data: String,
+    },
     /// 思考过程（DeepSeek reasoning_content / Claude thinking）
     Reasoning {
         text: String,

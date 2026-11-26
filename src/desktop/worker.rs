@@ -14,10 +14,18 @@ pub enum AccessMode {
 }
 
 pub enum Command {
-    Turn { id: u64, prompt: String, access: AccessMode, cancel: Arc<Notify> },
+    Turn {
+        id: u64,
+        prompt: String,
+        images: Vec<(String, String)>,
+        access: AccessMode,
+        cancel: Arc<Notify>,
+    },
     Workspace(PathBuf),
     Reopen(String),
     DeleteSession(String),
+    RenameSession(String, String),
+    TogglePinSession(String),
     New,
     Undo,
     SelectModel(String),
@@ -112,7 +120,7 @@ where
                 let mut reset = matches!(&command, Command::Workspace(_) | Command::New | Command::Reopen(_));
                 let result: anyhow::Result<()> = async {
                     match command {
-                        Command::Turn { id, prompt, access, cancel } => {
+                        Command::Turn { id, prompt, images, access, cancel } => {
                             agent.mode = if access == AccessMode::Plan { Mode::Plan } else { Mode::Build };
                             // Temporary grants belong to this turn, never the next one.
                             agent.perms = match access {
@@ -120,6 +128,14 @@ where
                                 AccessMode::Smart | AccessMode::Plan => Permissions::new(&config.permission),
                                 AccessMode::Full => Permissions::allow_all(),
                             };
+                            if !images.is_empty() {
+                                agent.push_user(
+                                    images
+                                        .into_iter()
+                                        .map(|(media_type, data)| Block::Image { media_type, data })
+                                        .collect(),
+                                );
+                            }
                             let expanded = crate::tui::app::expand_at_mentions(&agent.ctx.cwd, &prompt);
                             let (tx, mut ev) = mpsc::unbounded_channel();
                             let turn = agent.run_turn(expanded, tx, cancel);
@@ -151,6 +167,12 @@ where
                                 agent.ctx.tracker.lock().unwrap().clear_backups();
                                 reset = true;
                             }
+                        }
+                        Command::RenameSession(id, title) => {
+                            let _ = history::rename_session(&id, &title);
+                        }
+                        Command::TogglePinSession(id) => {
+                            let _ = history::toggle_pin_session(&id);
                         }
                         Command::New => {
                             agent.clear();
@@ -227,10 +249,15 @@ async fn fetch_remote_models(provider: &str, url: &str, key: &str) -> (Vec<Strin
     if base.is_empty() {
         return (Vec::new(), "请先填写接口地址".into());
     }
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build()
-    {
+    let is_local = base.contains("//127.0.0.1")
+        || base.contains("//localhost")
+        || base.contains("//[::1]");
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3));
+    if is_local {
+        builder = builder.no_proxy();
+    }
+    let client = match builder.build() {
         Ok(c) => c,
         Err(e) => return (Vec::new(), format!("无法初始化网络请求：{e}")),
     };
@@ -449,6 +476,7 @@ mod tests {
         tx.send(Command::Turn {
             id: 1,
             prompt: "Hello".into(),
+            images: Vec::new(),
             access: AccessMode::Smart,
             cancel: cancel1,
         })
@@ -470,6 +498,7 @@ mod tests {
         tx.send(Command::Turn {
             id: 2,
             prompt: "ASK_BASH".into(),
+            images: Vec::new(),
             access: AccessMode::Plan,
             cancel: cancel2,
         })
@@ -500,6 +529,7 @@ mod tests {
         tx.send(Command::Turn {
             id: 3,
             prompt: "SLOW_TURN".into(),
+            images: Vec::new(),
             access: AccessMode::Smart,
             cancel: cancel3.clone(),
         })

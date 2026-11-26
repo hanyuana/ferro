@@ -24,6 +24,16 @@ impl AnthropicProvider {
                     Block::Text { text } if !text.trim().is_empty() => {
                         blocks.push(json!({ "type": "text", "text": text }))
                     }
+                    Block::Image { media_type, data } => {
+                        blocks.push(json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": data,
+                            }
+                        }))
+                    }
                     Block::Reasoning { text, signature: Some(sig) } if thinking => {
                         blocks.push(json!({ "type": "thinking", "thinking": text, "signature": sig }))
                     }

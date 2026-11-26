@@ -1,5 +1,4 @@
-//! Ferro 桌面色板、控件样式与中文提示。
-//! 以中性灰白/深炭灰为基底，将 Ferro 品牌绿聚焦于主要操作与选中态。
+//! Ferro 桌面色板、控件样式与中文提示（1:1 ChatGPT 极简黑白灰中性体系）。
 
 use eframe::egui::{self, Color32, FontFamily, FontId, Rounding, Shadow, Stroke, TextStyle};
 
@@ -20,14 +19,15 @@ pub struct Palette {
     pub text_primary: Color32,
     pub text_secondary: Color32,
     pub text_muted: Color32,
-    /// Ferro 品牌绿主色（兼容 markdown 中的 blue 引用）
+    /// 代码高亮与链接色
     pub blue: Color32,
+    /// 主操作强调色（浅色为深墨黑，深色为纯白）
     pub accent: Color32,
-    pub accent_soft: Color32,
-    pub accent_border: Color32,
+    pub accent_fg: Color32,
+    /// 完全访问模式专属暖橙色（对齐 ChatGPT 完全访问胶囊）
     pub orange: Color32,
+    pub orange_soft: Color32,
     pub danger: Color32,
-    pub danger_soft: Color32,
     pub diff_add_bg: Color32,
     pub diff_add_fg: Color32,
     pub diff_del_bg: Color32,
@@ -36,62 +36,58 @@ pub struct Palette {
 
 impl Palette {
     pub fn light() -> Self {
-        let accent = Color32::from_rgb(22, 121, 91); // #16795b Ferro 品牌翡翠绿
         Self {
-            bg_sidebar: Color32::from_rgb(246, 247, 249),      // #f6f7f9 中性浅灰侧栏
-            bg_canvas: Color32::from_rgb(255, 255, 255),       // #ffffff 纯净白主区
-            bg_card: Color32::from_rgb(255, 255, 255),         // #ffffff 输入卡片
-            bg_hover: Color32::from_rgb(236, 238, 242),        // #eceef2 悬停中性灰
-            bg_active: Color32::from_rgb(228, 231, 236),       // #e4e7ec 按下中性灰
-            bg_user_bubble: Color32::from_rgb(242, 244, 247),  // #f2f4f7 克制中性用户气泡
-            text_user_bubble: Color32::from_rgb(17, 24, 39),   // #111827
-            bg_subtle: Color32::from_rgb(248, 249, 251),       // #f8f9fb 浅底容器
-            bg_code: Color32::from_rgb(248, 249, 251),         // #f8f9fb
-            bg_code_hdr: Color32::from_rgb(241, 243, 246),     // #f1f3f6
-            border: Color32::from_rgb(222, 226, 233),          // #dee2e9 精致边框
-            border_soft: Color32::from_rgb(235, 238, 243),     // #ebeef3 柔和分割线
-            text_primary: Color32::from_rgb(17, 24, 39),       // #111827
-            text_secondary: Color32::from_rgb(75, 85, 99),     // #4b5563
-            text_muted: Color32::from_rgb(138, 148, 166),      // #8a94a6
-            blue: accent,
-            accent,
-            accent_soft: Color32::from_rgb(232, 245, 239),     // #e8f5ef 选中态浅绿
-            accent_border: Color32::from_rgb(183, 223, 209),   // #b7dfd1 选中态边框
-            orange: Color32::from_rgb(180, 83, 9),             // #b45309
-            danger: Color32::from_rgb(220, 38, 38),            // #dc2626
-            danger_soft: Color32::from_rgb(254, 242, 242),     // #fef2f2
-            diff_add_bg: Color32::from_rgb(220, 252, 231),     // #dcfce7
-            diff_add_fg: Color32::from_rgb(22, 101, 52),       // #166534
-            diff_del_bg: Color32::from_rgb(254, 226, 226),     // #fee2e2
-            diff_del_fg: Color32::from_rgb(153, 27, 27),       // #991b1b
+            bg_sidebar: Color32::from_rgb(249, 249, 249),      // #f9f9f9 (--gray-fixed-50) ChatGPT 侧栏浅灰
+            bg_canvas: Color32::from_rgb(255, 255, 255),       // #ffffff (--gray-fixed-0) 主画布纯白
+            bg_card: Color32::from_rgb(255, 255, 255),         // #ffffff (--gray-fixed-0) 浮空纯白输入舱
+            bg_hover: Color32::from_rgb(243, 243, 243),        // #f3f3f3 (--gray-fixed-75) 扁平项悬停态
+            bg_active: Color32::from_rgb(237, 237, 237),       // #ededed (--gray-fixed-100) 扁平项选中态
+            bg_user_bubble: Color32::from_rgb(243, 243, 243),  // #f3f3f3 (--gray-fixed-75) 用户消息胶囊气泡
+            text_user_bubble: Color32::from_rgb(13, 13, 13),   // #0d0d0d (--gray-fixed-1000)
+            bg_subtle: Color32::from_rgb(243, 243, 243),       // #f3f3f3 (--gray-fixed-75) 内部小胶囊底色
+            bg_code: Color32::from_rgb(249, 249, 249),         // #f9f9f9 (--gray-fixed-50)
+            bg_code_hdr: Color32::from_rgb(243, 243, 243),     // #f3f3f3 (--gray-fixed-75)
+            border: Color32::from_rgb(223, 223, 223),          // #dfdfdf (--gray-fixed-150)
+            border_soft: Color32::from_rgb(237, 237, 237),     // #ededed (--gray-fixed-100)
+            text_primary: Color32::from_rgb(13, 13, 13),       // #0d0d0d (--gray-fixed-1000)
+            text_secondary: Color32::from_rgb(93, 93, 93),     // #5d5d5d (--gray-fixed-500)
+            text_muted: Color32::from_rgb(143, 143, 143),      // #8f8f8f (--gray-fixed-400)
+            blue: Color32::from_rgb(22, 121, 91),
+            accent: Color32::from_rgb(13, 13, 13),             // #0d0d0d 纯黑主操作按钮
+            accent_fg: Color32::WHITE,
+            orange: Color32::from_rgb(180, 76, 16),            // #b44c10 完全访问暖棕橙
+            orange_soft: Color32::from_rgb(253, 243, 234),     // #fdf3ea 完全访问柔和底
+            danger: Color32::from_rgb(220, 38, 38),
+            diff_add_bg: Color32::from_rgb(220, 252, 231),
+            diff_add_fg: Color32::from_rgb(22, 101, 52),
+            diff_del_bg: Color32::from_rgb(254, 226, 226),
+            diff_del_fg: Color32::from_rgb(153, 27, 27),
         }
     }
 
     pub fn dark() -> Self {
-        let accent = Color32::from_rgb(47, 179, 136); // #2fb388 Ferro 深色翡翠绿
         Self {
-            bg_sidebar: Color32::from_rgb(17, 19, 24),         // #111318 深中性侧栏
-            bg_canvas: Color32::from_rgb(22, 24, 29),          // #16181d 深中性主区
-            bg_card: Color32::from_rgb(28, 31, 38),            // #1c1f26 输入卡片
-            bg_hover: Color32::from_rgb(36, 40, 50),           // #242832
-            bg_active: Color32::from_rgb(44, 49, 61),          // #2c313d
-            bg_user_bubble: Color32::from_rgb(35, 39, 50),     // #232732
-            text_user_bubble: Color32::from_rgb(241, 245, 249),// #f1f5f9
-            bg_subtle: Color32::from_rgb(27, 30, 37),          // #1b1e25
-            bg_code: Color32::from_rgb(16, 18, 23),            // #101217
-            bg_code_hdr: Color32::from_rgb(24, 27, 35),        // #181b23
-            border: Color32::from_rgb(45, 50, 62),             // #2d323e
-            border_soft: Color32::from_rgb(34, 38, 48),        // #222630
-            text_primary: Color32::from_rgb(236, 238, 242),    // #eceef2
-            text_secondary: Color32::from_rgb(161, 170, 184),  // #a1aab8
-            text_muted: Color32::from_rgb(110, 119, 135),      // #6e7787
-            blue: accent,
-            accent,
-            accent_soft: Color32::from_rgb(24, 52, 44),        // #18342c 深色选中态浅绿
-            accent_border: Color32::from_rgb(36, 85, 70),      // #245546
-            orange: Color32::from_rgb(251, 191, 36),           // #fbbf24
-            danger: Color32::from_rgb(248, 113, 113),          // #f87171
-            danger_soft: Color32::from_rgb(52, 27, 30),        // #341b1e
+            bg_sidebar: Color32::from_rgb(24, 24, 24),         // #181818 (--gray-fixed-900) ChatGPT 深色侧栏
+            bg_canvas: Color32::from_rgb(33, 33, 33),          // #212121 (--gray-fixed-800) ChatGPT 深色主画布
+            bg_card: Color32::from_rgb(48, 48, 48),            // #303030 (--gray-fixed-700) ChatGPT 深色输入舱
+            bg_hover: Color32::from_rgb(40, 40, 40),           // #282828 (--gray-fixed-750)
+            bg_active: Color32::from_rgb(48, 48, 48),          // #303030 (--gray-fixed-700)
+            bg_user_bubble: Color32::from_rgb(48, 48, 48),     // #303030 (--gray-fixed-700)
+            text_user_bubble: Color32::from_rgb(243, 243, 243),
+            bg_subtle: Color32::from_rgb(40, 40, 40),
+            bg_code: Color32::from_rgb(22, 22, 22),
+            bg_code_hdr: Color32::from_rgb(33, 33, 33),
+            border: Color32::from_rgb(57, 57, 57),             // #393939 (--gray-fixed-650)
+            border_soft: Color32::from_rgb(48, 48, 48),        // #303030 (--gray-fixed-700)
+            text_primary: Color32::from_rgb(243, 243, 243),    // #f3f3f3 (--gray-fixed-75)
+            text_secondary: Color32::from_rgb(175, 175, 175),  // #afafaf (--gray-fixed-300)
+            text_muted: Color32::from_rgb(143, 143, 143),      // #8f8f8f (--gray-fixed-400)
+            blue: Color32::from_rgb(52, 211, 153),
+            accent: Color32::from_rgb(249, 249, 249),          // 纯白主操作按钮
+            accent_fg: Color32::from_rgb(13, 13, 13),
+            orange: Color32::from_rgb(251, 146, 60),
+            orange_soft: Color32::from_rgb(58, 34, 18),
+            danger: Color32::from_rgb(248, 113, 113),
             diff_add_bg: Color32::from_rgba_unmultiplied(34, 197, 94, 42),
             diff_add_fg: Color32::from_rgb(134, 239, 172),
             diff_del_bg: Color32::from_rgba_unmultiplied(239, 68, 68, 42),
@@ -110,37 +106,37 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) -> Palette {
     style.text_styles.insert(TextStyle::Small, FontId::new(12.0, FontFamily::Proportional));
     style.text_styles.insert(TextStyle::Monospace, FontId::new(12.5, FontFamily::Monospace));
 
-    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-    style.spacing.button_padding = egui::vec2(10.0, 5.5);
+    style.spacing.item_spacing = egui::vec2(8.0, 5.0);
+    style.spacing.button_padding = egui::vec2(9.0, 5.0);
     style.spacing.menu_margin = egui::Margin::same(8.0);
     style.spacing.window_margin = egui::Margin::same(18.0);
-    style.spacing.combo_width = 216.0;
+    style.spacing.combo_width = 200.0;
     style.spacing.scroll.bar_width = 5.0;
     style.spacing.scroll.floating = true;
 
     let mut v = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
     v.panel_fill = p.bg_canvas;
-    v.window_fill = p.bg_card;
+    v.window_fill = p.bg_canvas;
     v.window_stroke = Stroke::new(1.0_f32, p.border);
-    v.window_rounding = Rounding::same(12.0);
-    v.menu_rounding = Rounding::same(10.0);
+    v.window_rounding = Rounding::same(14.0);
+    v.menu_rounding = Rounding::same(12.0);
     v.window_shadow = Shadow {
         offset: egui::vec2(0.0, 6.0),
-        blur: 20.0,
+        blur: 22.0,
         spread: 0.0,
-        color: Color32::from_black_alpha(if dark { 110 } else { 24 }),
+        color: Color32::from_black_alpha(if dark { 110 } else { 26 }),
     };
     v.popup_shadow = Shadow {
         offset: egui::vec2(0.0, 4.0),
-        blur: 14.0,
+        blur: 16.0,
         spread: 0.0,
         color: Color32::from_black_alpha(if dark { 100 } else { 22 }),
     };
     v.extreme_bg_color = p.bg_subtle;
     v.faint_bg_color = p.bg_subtle;
     v.override_text_color = Some(p.text_primary);
-    v.selection.bg_fill = p.accent_soft;
-    v.selection.stroke = Stroke::new(1.0_f32, p.accent);
+    v.selection.bg_fill = p.bg_active;
+    v.selection.stroke = Stroke::new(1.0_f32, p.text_primary);
 
     let r = Rounding::same(8.0);
     v.widgets.noninteractive.bg_fill = p.bg_canvas;
@@ -149,7 +145,6 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) -> Palette {
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, p.text_secondary);
     v.widgets.noninteractive.rounding = r;
 
-    // 保留柔和边框使复选框与单行输入框清晰可见；扁平文字按钮按需单独去除描边
     v.widgets.inactive.bg_fill = p.bg_subtle;
     v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, p.border);
@@ -162,10 +157,10 @@ pub fn apply_theme(ctx: &egui::Context, dark: bool) -> Palette {
     v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, p.text_primary);
     v.widgets.hovered.rounding = r;
 
-    v.widgets.active.bg_fill = p.accent_soft;
-    v.widgets.active.weak_bg_fill = p.accent_soft;
-    v.widgets.active.bg_stroke = Stroke::new(1.0_f32, p.accent);
-    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, p.accent);
+    v.widgets.active.bg_fill = p.bg_active;
+    v.widgets.active.weak_bg_fill = p.bg_active;
+    v.widgets.active.bg_stroke = Stroke::new(1.0_f32, p.border);
+    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, p.text_primary);
     v.widgets.active.rounding = r;
 
     v.widgets.open.bg_fill = p.bg_active;

@@ -358,11 +358,17 @@ impl Config {
             Some(k) => Some(k.to_string()),
             None => None,
         };
-        let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(30))
-            .tcp_nodelay(true)
-            .build()?;
         let base_url = pc.base_url.clone().unwrap_or_default();
+        let is_local = base_url.contains("//127.0.0.1")
+            || base_url.contains("//localhost")
+            || base_url.contains("//[::1]");
+        let mut builder = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .tcp_nodelay(true);
+        if is_local {
+            builder = builder.no_proxy();
+        }
+        let client = builder.build()?;
         let provider: Arc<dyn Provider> = match pc.kind {
             ProviderKind::Openai => Arc::new(OpenAiProvider {
                 client,

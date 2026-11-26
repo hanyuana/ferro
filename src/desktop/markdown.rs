@@ -412,8 +412,8 @@ pub fn render_diff_or_output(ui: &mut egui::Ui, text: &str, p: &Palette) {
         });
 }
 
-/// 零依赖纯 Rust RGBA -> PNG 写入器（标准 zlib 非压缩块），用于保存真实窗口帧缓冲截图。
-pub fn write_rgba_png(path: &std::path::Path, width: u32, height: u32, rgba: &[u8]) -> std::io::Result<()> {
+/// 零依赖纯 Rust RGBA -> PNG 内存编码器（标准 zlib 非压缩块）。
+pub fn encode_rgba_png(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     let row_bytes = (width as usize) * 4;
     let mut raw = Vec::with_capacity((row_bytes + 1) * (height as usize));
     for y in 0..(height as usize) {
@@ -466,10 +466,33 @@ pub fn write_rgba_png(path: &std::path::Path, width: u32, height: u32, rgba: &[u
     push_chunk(&mut png, b"IHDR", &ihdr);
     push_chunk(&mut png, b"IDAT", &zlib);
     push_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+/// 零依赖纯 Rust RGBA -> PNG 写入器，用于保存真实窗口帧缓冲截图。
+pub fn write_rgba_png(path: &std::path::Path, width: u32, height: u32, rgba: &[u8]) -> std::io::Result<()> {
+    let png = encode_rgba_png(width, height, rgba);
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     std::fs::write(path, png)
+}
+
+/// 零依赖标准 Base64 编码器（用于多模态图片 Data URL 传输）。
+pub fn base64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((n >> 18) & 0x3F) as usize]);
+        out.push(TABLE[((n >> 12) & 0x3F) as usize]);
+        out.push(if chunk.len() > 1 { TABLE[((n >> 6) & 0x3F) as usize] } else { b'=' });
+        out.push(if chunk.len() > 2 { TABLE[(n & 0x3F) as usize] } else { b'=' });
+    }
+    String::from_utf8(out).unwrap_or_default()
 }
 
 #[cfg(test)]

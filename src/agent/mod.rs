@@ -93,7 +93,7 @@ impl Agent {
     }
 
     /// 追加用户消息；若末尾已是用户消息则合并（保证角色交替）
-    fn push_user(&mut self, blocks: Vec<Block>) {
+    pub fn push_user(&mut self, blocks: Vec<Block>) {
         if let Some(last) = self.messages.last_mut() {
             if last.role == Role::User {
                 last.content.extend(blocks);

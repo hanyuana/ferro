@@ -16,6 +16,10 @@ struct SessionHeader {
     id: String,
     cwd: String,
     created_at: u64,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    pinned: bool,
 }
 
 pub fn sessions_dir() -> PathBuf {
@@ -43,10 +47,17 @@ pub fn save_session(id: &str, cwd: &Path, messages: &[Message]) -> Result<()> {
         .next()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
+    let (existing_title, existing_pinned) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| s.lines().next().and_then(|l| serde_json::from_str::<SessionHeader>(l).ok()))
+        .map(|h| (h.title, h.pinned))
+        .unwrap_or((None, false));
     let header = SessionHeader {
         id: id.to_string(),
         cwd: cwd.to_string_lossy().to_string(),
         created_at,
+        title: existing_title,
+        pinned: existing_pinned,
     };
     let mut out = serde_json::to_string(&header)? + "\n";
     for m in messages {
@@ -63,6 +74,7 @@ pub struct SessionInfo {
     pub title: String,
     pub created_at: u64,
     pub count: usize,
+    pub pinned: bool,
 }
 
 /// 从单条用户消息中尝试提取会话标题（跳过系统提醒与 @文件 附件内容）
@@ -106,7 +118,7 @@ fn read_session_info(path: &Path, cwd_str: &str) -> Option<SessionInfo> {
     if !hdr.cwd.eq_ignore_ascii_case(cwd_str) {
         return None;
     }
-    let mut title: Option<String> = None;
+    let mut title: Option<String> = hdr.title.clone().filter(|t| !t.trim().is_empty());
     let mut count = 0usize;
     loop {
         line.clear();
@@ -130,13 +142,14 @@ fn read_session_info(path: &Path, cwd_str: &str) -> Option<SessionInfo> {
     }
     Some(SessionInfo {
         id: hdr.id,
-        title: title.unwrap_or_else(|| "新会话".into()),
+        title: title.unwrap_or_else(|| "新聊天".into()),
         created_at: hdr.created_at,
         count,
+        pinned: hdr.pinned,
     })
 }
 
-/// 列出某个工作区下的历史会话（按时间倒序）
+/// 列出某个工作区下的历史会话（置顶优先，按时间倒序）
 pub fn list_sessions(cwd: &Path) -> Vec<SessionInfo> {
     let Ok(rd) = std::fs::read_dir(sessions_dir()) else {
         return Vec::new();
@@ -148,9 +161,52 @@ pub fn list_sessions(cwd: &Path) -> Vec<SessionInfo> {
         .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl"))
         .filter_map(|p| read_session_info(&p, &cwd_str))
         .collect();
-    out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    out.sort_by(|a, b| b.pinned.cmp(&a.pinned).then_with(|| b.created_at.cmp(&a.created_at)));
     out.truncate(50);
     out
+}
+
+/// 修改历史会话标题（重命名聊天）
+pub fn rename_session(id: &str, new_title: &str) -> bool {
+    if id.is_empty() || id.contains(['/', '\\', '.']) {
+        return false;
+    }
+    let path = sessions_dir().join(format!("{}.jsonl", id));
+    let Some((mut hdr, msgs)) = read_session_file(&path) else {
+        return false;
+    };
+    let trimmed = new_title.trim();
+    hdr.title = if trimmed.is_empty() { None } else { Some(trimmed.chars().take(60).collect()) };
+    let Ok(first) = serde_json::to_string(&hdr) else { return false };
+    let mut out = first + "\n";
+    for m in &msgs {
+        if let Ok(s) = serde_json::to_string(m) {
+            out.push_str(&s);
+            out.push('\n');
+        }
+    }
+    std::fs::write(path, out).is_ok()
+}
+
+/// 切换历史会话置顶状态
+pub fn toggle_pin_session(id: &str) -> bool {
+    if id.is_empty() || id.contains(['/', '\\', '.']) {
+        return false;
+    }
+    let path = sessions_dir().join(format!("{}.jsonl", id));
+    let Some((mut hdr, msgs)) = read_session_file(&path) else {
+        return false;
+    };
+    hdr.pinned = !hdr.pinned;
+    let Ok(first) = serde_json::to_string(&hdr) else { return false };
+    let mut out = first + "\n";
+    for m in &msgs {
+        if let Ok(s) = serde_json::to_string(m) {
+            out.push_str(&s);
+            out.push('\n');
+        }
+    }
+    std::fs::write(path, out).is_ok()
 }
 
 /// Workspace-scoped full text search for the desktop history picker.

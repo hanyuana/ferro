@@ -20,6 +20,7 @@ impl OpenAiProvider {
             match m.role {
                 Role::User => {
                     let mut text = String::new();
+                    let mut images: Vec<(String, String)> = Vec::new();
                     for b in &m.content {
                         match b {
                             Block::ToolResult { tool_use_id, content, .. } => out.push(json!({
@@ -33,11 +34,28 @@ impl OpenAiProvider {
                                 }
                                 text.push_str(t);
                             }
+                            Block::Image { media_type, data } => {
+                                images.push((media_type.clone(), data.clone()));
+                            }
                             _ => {}
                         }
                     }
-                    if !text.is_empty() {
-                        out.push(json!({ "role": "user", "content": text }));
+                    if images.is_empty() {
+                        if !text.is_empty() {
+                            out.push(json!({ "role": "user", "content": text }));
+                        }
+                    } else {
+                        let mut parts = Vec::new();
+                        if !text.is_empty() {
+                            parts.push(json!({ "type": "text", "text": text }));
+                        }
+                        for (mt, b64) in images {
+                            parts.push(json!({
+                                "type": "image_url",
+                                "image_url": { "url": format!("data:{mt};base64,{b64}") }
+                            }));
+                        }
+                        out.push(json!({ "role": "user", "content": parts }));
                     }
                 }
                 Role::Assistant => {
